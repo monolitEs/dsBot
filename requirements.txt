@@ -1,4 +1,4 @@
-discord.py==2.5.2
+py-cord[voice]==2.8.1
 gTTS==2.5.4
 openai==1.91.0
 openai_whisper==20240930
