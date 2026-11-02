@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+install -d -m 0700 -o 10001 -g 10001 /data
+
 nfq_pid=
 bot_pid=
 firewalls=()

@@ -1,0 +1,40 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dsbot-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, ci]
+    container:
+      image: ghcr.io/catthehacker/ubuntu:act-24.04
+      options: --volume /var/run/docker.sock:/var/run/docker.sock
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEPLOY_SHA: ${{ github.sha }}
+      DOCKER_HOST: unix:///var/run/docker.sock
+      COMPOSE_PROJECT_NAME: dsbot
+      DSBOT_DATA_DIR: ${{ vars.DSBOT_DATA_DIR }}
+
+    steps:
+      - name: Checkout pushed commit
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Build and deploy on mercury
+        env:
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: bash .github/scripts/deploy.sh
