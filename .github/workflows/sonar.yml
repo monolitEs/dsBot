@@ -1,0 +1,39 @@
+name: SonarQube Cloud
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sonar-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sonar:
+    name: Sonar Quality Gate
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: SonarQube Cloud analysis and Quality Gate
+        uses: SonarSource/sonarqube-scan-action@v8.4.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: https://sonarcloud.io
+        with:
+          args: >-
+            "-Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}"
+            "-Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}"
+            -Dsonar.qualitygate.wait=true
+            -Dsonar.qualitygate.timeout=300
