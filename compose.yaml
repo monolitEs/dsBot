@@ -1,0 +1,21 @@
+name: dsbot
+services:
+  bot:
+    image: dsbot:${DEPLOY_SHA:-local}
+    build: .
+    init: true
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN:?Set DISCORD_TOKEN}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY to the DeepSeek key}
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
