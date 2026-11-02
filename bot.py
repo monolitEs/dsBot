@@ -1,8 +1,6 @@
 import os
 
 import discord
-import whisper
-import vosk
 from datetime import datetime 
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -11,9 +9,6 @@ from discord import Option
 from modules.role_manager import RoleManager
 from modules.ytdl import Music
 from modules.chat import Chat
-from voice_interface.sinks import StreamSink
-from voice_interface.stt import detect_words, speech_to_text
-from voice_interface import VoiceCommandInterface
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents)
@@ -25,6 +20,9 @@ voice_assistant = None
 async_task = None
 
 def init(voice_assistant_bool):
+    if voice_assistant_bool:
+        raise RuntimeError("Распознавание речи временно отключено. Запустите бота с аргументом false.")
+
     load_dotenv()
 
     global chat
@@ -36,13 +34,6 @@ def init(voice_assistant_bool):
 
     global voice_assistant
     voice_assistant = voice_assistant_bool
-
-    if voice_assistant:
-        small_model = vosk.Model("vosk-model-small-ru")
-        main_model = whisper.load_model("small")
-        global voice_command_interface
-        voice_command_interface = VoiceCommandInterface(bot, speech_to_text, detect_words, main_model,
-                                                     small_model, chat,music)
 
     return bot
 
@@ -101,6 +92,8 @@ async def on_message(message):
         return await message.reply(await chat.send_message(message))
 
 async def start_recording(message):
+    from voice_interface.sinks import StreamSink
+
     vc = await music.join(message)
 
     sink = StreamSink()
