@@ -8,12 +8,24 @@ class StreamAudioData(sinks.AudioData):
         self.last_read_byte = 0
 
 class StreamSink(sinks.WaveSink):
-    def __init__(self, *args, filters=None):
-        
-        super().__init__()
+    # Pycord 2.8's reader expects the sink event/tree protocol even for a leaf.
+    __sink_listeners__ = ()
+
+    def __init__(self, *, filters=None):
+        super().__init__(filters=filters)
+
+    def is_opus(self):
+        return False  # Ask PacketDecoder for PCM, preserving the existing STT input.
+
+    def walk_children(self):
+        return iter(())
+
+    def write(self, data, user):
+        if user is not None:
+            self._write_pcm(data.pcm, user.id)
 
     @sinks.Filters.container
-    def write(self, data, user):
+    def _write_pcm(self, data, user):
         if user not in self.audio_data:
             file = io.BytesIO()
             self.audio_data.update({user: StreamAudioData(file)})
