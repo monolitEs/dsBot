@@ -1,6 +1,6 @@
 """Voice orchestration tests; Pycord/pydub/Vosk tests run in the bot image."""
 import asyncio
-from contextlib import chdir
+from contextlib import chdir, redirect_stdout
 import importlib.util
 import io
 import json
@@ -22,6 +22,16 @@ if AVAILABLE:
 
 @unittest.skipUnless(AVAILABLE, 'Requires bot runtime dependencies')
 class SessionTests(unittest.IsolatedAsyncioTestCase):
+    def test_audio_diagnostics_log_only_size_level_and_speech_flag(self):
+        from voice_interface.core import log_audio
+        output = io.StringIO()
+        with redirect_stdout(output):
+            log_audio(b'\xe8\x03\x18\xfc' * 2, 'fake-secret')
+            log_audio(b'')
+        self.assertIn('STT audio bytes=8 rms=1000 words=true', output.getvalue())
+        self.assertIn('STT audio bytes=0 rms=0 words=not_checked', output.getvalue())
+        self.assertNotIn('fake-secret', output.getvalue())
+
     def make_session(self):
         cloud = SimpleNamespace(start=AsyncMock(), transcribe=AsyncMock(return_value='cloud'), close=AsyncMock())
         local = SimpleNamespace(start=AsyncMock(), transcribe=AsyncMock(return_value='local'), close=AsyncMock())

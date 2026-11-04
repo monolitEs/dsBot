@@ -125,3 +125,20 @@ class VoiceReceiveTests(unittest.IsolatedAsyncioTestCase):
             app.recording_finished(RuntimeError('fake-secret'))
         self.assertIn('STT receive error=RuntimeError', output.getvalue())
         self.assertNotIn('fake-secret', output.getvalue())
+
+    async def test_receive_diagnostics_count_frames_without_audio_content(self):
+        sink = StreamSink()
+        sender = Object(id=42)
+        payload = b'fake-secret'
+        output = io.StringIO()
+        with redirect_stdout(output):
+            sink.write(VoiceData(None, None, pcm=payload), None)
+            for _ in range(249):
+                sink.write(VoiceData(None, sender, pcm=payload), sender)
+        self.assertEqual(sink.received_frames, 250)
+        self.assertEqual(sink.unassigned_frames, 1)
+        self.assertEqual(sink.read(42), payload * 249)
+        self.assertIn('frames=1 unassigned=1 pcm_bytes=11', output.getvalue())
+        self.assertIn('frames=250 unassigned=1 pcm_bytes=11', output.getvalue())
+        self.assertEqual(len(output.getvalue().splitlines()), 2)
+        self.assertNotIn('fake-secret', output.getvalue())

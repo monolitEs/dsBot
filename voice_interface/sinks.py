@@ -13,6 +13,8 @@ class StreamSink(sinks.WaveSink):
 
     def __init__(self, *, filters=None):
         super().__init__(filters=filters)
+        self.received_frames = 0
+        self.unassigned_frames = 0
 
     def is_opus(self):
         return False  # Ask PacketDecoder for PCM, preserving the existing STT input.
@@ -21,8 +23,14 @@ class StreamSink(sinks.WaveSink):
         return iter(())
 
     def write(self, data, user):
+        self.received_frames += 1
         if user is not None:
             self._write_pcm(data.pcm, user.id)
+        else:
+            self.unassigned_frames += 1
+        if self.received_frames == 1 or self.received_frames % 250 == 0:
+            print(f'STT receive frames={self.received_frames} '
+                  f'unassigned={self.unassigned_frames} pcm_bytes={len(data.pcm)}')
 
     @sinks.Filters.container
     def _write_pcm(self, data, user):

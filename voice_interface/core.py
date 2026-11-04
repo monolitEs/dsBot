@@ -30,6 +30,12 @@ def write_wav(filename, data):
         file.write(data)
 
 
+def log_audio(data, words=None):
+    level = audioop.rms(data, 2) if data else 0
+    detected = 'not_checked' if words is None else str(bool(words)).lower()
+    print(f'STT audio bytes={len(data)} rms={level} words={detected}')
+
+
 def make_file(file_pattern, user_id):
     matching_files = sorted(glob.glob(file_pattern))
     if matching_files:
@@ -79,6 +85,7 @@ class VoiceCommandInterface:
             try:
                 data = sink.read(user_id)
             except KeyError:
+                log_audio(b'')
                 return
             
             wf = save_and_mono_wav(
@@ -86,6 +93,7 @@ class VoiceCommandInterface:
             )
 
             words = await self.session.detect(wf) if data else ''
+            log_audio(data, words)
             if self.session.closed:
                 return
             if words:
