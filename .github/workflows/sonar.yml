@@ -26,6 +26,20 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.txt coverage==7.17.1
+
+      - name: Run tests and generate coverage
+        run: |
+          python -m coverage run --source=. -m unittest discover -s tests -v
+          python -m coverage xml
+
       - name: SonarQube Cloud analysis and Quality Gate
         uses: SonarSource/sonarqube-scan-action@v8.4.0
         env:

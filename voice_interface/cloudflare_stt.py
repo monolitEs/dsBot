@@ -10,6 +10,21 @@ import urllib.request
 from .transcription import QuotaExceeded, SerializedTranscriber, SttError, read_pcm
 
 
+def _http_error(error: urllib.error.HTTPError) -> SttError:
+    codes = []
+    try:
+        failure = json.load(error)
+        errors = failure.get('errors', []) if isinstance(failure, dict) else []
+        codes = [item.get('code') for item in errors if isinstance(item, dict)]
+    except (ValueError, TypeError, OSError, HTTPException):
+        pass
+    finally:
+        error.close()
+    if error.code == 429 and 3036 in codes:
+        return QuotaExceeded('Cloudflare daily STT quota exceeded')
+    return SttError(f'Cloudflare HTTP {error.code}')
+
+
 class CloudflareTranscriber(SerializedTranscriber):
     def __init__(self, account_id: str, token: str, timeout: float = 45):
         super().__init__()
@@ -25,9 +40,9 @@ class CloudflareTranscriber(SerializedTranscriber):
 
     def _transcribe(self, wav: bytes) -> str:
         read_pcm(wav)
-        body = json.dumps(dict(audio=base64.b64encode(wav).decode('ascii'),
-                               language='ru', task='transcribe', beam_size=5,
-                               vad_filter=False, condition_on_previous_text=True)).encode()
+        body = json.dumps({'audio': base64.b64encode(wav).decode('ascii'),
+                           'language': 'ru', 'task': 'transcribe', 'beam_size': 5,
+                           'vad_filter': False, 'condition_on_previous_text': True}).encode()
         request = urllib.request.Request(self._url, data=body, headers={
             'Authorization': f'Bearer {self._token}', 'Content-Type': 'application/json'},
             method='POST')
@@ -35,19 +50,8 @@ class CloudflareTranscriber(SerializedTranscriber):
             with urllib.request.urlopen(request, timeout=self._timeout) as response:
                 payload = json.load(response)
         except urllib.error.HTTPError as error:
-            codes = []
-            try:
-                failure = json.load(error)
-                errors = failure.get('errors', []) if isinstance(failure, dict) else []
-                codes = [item.get('code') for item in errors if isinstance(item, dict)]
-            except (ValueError, TypeError, OSError, HTTPException):
-                pass
-            finally:
-                error.close()
-            if error.code == 429 and 3036 in codes:
-                raise QuotaExceeded('Cloudflare daily STT quota exceeded') from None
-            raise SttError(f'Cloudflare HTTP {error.code}') from None
-        except (urllib.error.URLError, OSError, HTTPException):
+            raise _http_error(error) from None
+        except (OSError, HTTPException):
             raise SttError('Cloudflare network/TLS/timeout failure') from None
         except ValueError:
             raise SttError('Invalid Cloudflare JSON response') from None

@@ -180,23 +180,78 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(SttError):
             await session.transcribe('no-file-needed')
 
-    async def test_stop_running_listener_cleans_partial_phrase_but_keeps_models(self):
+    async def test_stt_failure_removes_merged_wav_without_reply(self):
         session = self.make_session()
-        session.detector = object()
-        detected = asyncio.Event()
+        session.transcribe = AsyncMock(side_effect=SttError('Cloudflare HTTP 403'))
+        message = SimpleNamespace(guild=SimpleNamespace(id=10), content='!record')
+        chat = SimpleNamespace(send_message=AsyncMock())
+        music = SimpleNamespace(say=AsyncMock())
+        interface = VoiceCommandInterface(None, session, chat, music)
+        sink = SimpleNamespace(read=Mock(return_value=b''))
+        with tempfile.TemporaryDirectory() as directory:
+            merged = Path(directory) / 'merged.wav'
+            merged.write_bytes(b'placeholder')
+            with patch('voice_interface.core.make_file', return_value=str(merged)), \
+                    patch('discord.ext.tasks.Loop.start'):
+                loop = await interface.start_listening(message, sink, 7)
+                await loop.coro(message)
+            self.assertFalse(merged.exists())
+        chat.send_message.assert_not_called()
+        music.say.assert_not_called()
 
-        async def detect(wav):
-            detected.set()
-            return 'words'
+    async def test_stop_drains_wav_writer_before_cleaning_files(self):
+        session = self.make_session()
+        session.detect = AsyncMock(return_value='words')
+        entered, finish = threading.Event(), threading.Event()
+        loop_thread = threading.get_ident()
+        writer_threads = []
 
-        session.detect = detect
+        def write_wav(filename, data):
+            writer_threads.append(threading.get_ident())
+            entered.set()
+            if not finish.wait(5):
+                raise RuntimeError('writer test timed out')
+            Path(filename).write_bytes(data)
+
         message = SimpleNamespace(guild=SimpleNamespace(id=10), content='!record')
         interface = VoiceCommandInterface(None, session, None, None)
         sink = SimpleNamespace(read=Mock(return_value=b'\0' * 1920))
-        with tempfile.TemporaryDirectory() as directory, chdir(directory):
+        with tempfile.TemporaryDirectory() as directory, chdir(directory), \
+                patch('voice_interface.core.write_wav', side_effect=write_wav, create=True):
+            session.listener = await interface.start_listening(message, sink, 7, interval=60)
+            try:
+                self.assertTrue(await asyncio.to_thread(entered.wait, 5))
+                stopping = asyncio.create_task(session.stop())
+                await asyncio.sleep(0.02)
+                self.assertFalse(stopping.done())
+                self.assertNotEqual(writer_threads, [loop_thread])
+                finish.set()
+                await stopping
+            finally:
+                finish.set()
+                await session.stop()
+            self.assertFalse(list(Path('.').glob('*.wav')))
+
+    async def test_stop_running_listener_cleans_partial_phrase_but_keeps_models(self):
+        from voice_interface.core import write_wav
+        session = self.make_session()
+        session.detector = object()
+        session.detect = AsyncMock(return_value='words')
+        saved = asyncio.Event()
+        event_loop = asyncio.get_running_loop()
+
+        def save(filename, data):
+            write_wav(filename, data)
+            event_loop.call_soon_threadsafe(saved.set)
+
+        message = SimpleNamespace(guild=SimpleNamespace(id=10), content='!record')
+        interface = VoiceCommandInterface(None, session, None, None)
+        sink = SimpleNamespace(read=Mock(return_value=b'\0' * 1920))
+        with tempfile.TemporaryDirectory() as directory, chdir(directory), \
+                patch('voice_interface.core.write_wav', side_effect=save):
             session.listener = await interface.start_listening(message, sink, 7)
             try:
-                await asyncio.wait_for(detected.wait(), 2)
+                await asyncio.wait_for(saved.wait(), 2)
                 self.assertTrue(list(Path('.').glob('*.wav')))
             finally:
                 await session.stop()

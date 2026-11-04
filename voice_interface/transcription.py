@@ -87,9 +87,11 @@ class SerializedTranscriber(ABC):
                 await run_blocking(self._unload)
 
     def _load(self):
+        # Backends without a persistent model need no loading step.
         pass
 
     def _unload(self):
+        # Backends without persistent resources need no unloading step.
         pass
 
     @abstractmethod

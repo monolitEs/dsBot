@@ -12,7 +12,7 @@ import os
 import time
 from copy import copy
 from uuid import uuid4
-from .transcription import SttError
+from .transcription import SttError, run_blocking
 
 
 def save_and_mono_wav(data: bytearray, sample_size = 2, channels = 2, sampling_rate = 48000):
@@ -24,6 +24,11 @@ def save_and_mono_wav(data: bytearray, sample_size = 2, channels = 2, sampling_r
     )
     segment = segment.set_channels(1)
     return segment.export(format="wav")
+
+def write_wav(filename, data):
+    with open(filename, 'wb') as file:
+        file.write(data)
+
 
 def make_file(file_pattern, user_id):
     matching_files = sorted(glob.glob(file_pattern))
@@ -83,28 +88,13 @@ class VoiceCommandInterface:
             words = await self.session.detect(wf) if data else ''
             if self.session.closed:
                 return
-            if len(words) != 0:
-                with open(f"{recording_id}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S_%f')}.wav", "wb") as file:
-                    file.write(wf.getbuffer())
-            elif len(words) == 0:
-
-                filename = make_file(f"{recording_id}_*.wav", recording_id)
-                try:
-                    if filename:
-                        start_time = time.monotonic()
-                        result = await self.session.transcribe(filename)
-                        print(f'STT seconds={time.monotonic() - start_time:.3f}')
-                        if result and not self.session.closed:
-                            request = copy(message)
-                            request.content = '!' + result
-                            answer = await self.chat.send_message(request)
-                            if not self.session.closed:
-                                await self.music.say(request, answer)
-                except SttError as error:
-                    print(f'STT error={error}')
-                finally:
-                    if filename:
-                        os.remove(filename)
+            if words:
+                filename = f"{recording_id}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S_%f')}.wav"
+                await run_blocking(write_wav, filename, wf.getbuffer())
+            else:
+                filename = await run_blocking(make_file, f"{recording_id}_*.wav", recording_id)
+                if filename:
+                    await self._process_recording(message, filename)
                     
                 
                 
@@ -118,6 +108,23 @@ class VoiceCommandInterface:
 
         listening_task.start(message)
         return listening_task # call .stop() on the returned task to stop the task
+
+    async def _process_recording(self, message, filename):
+        try:
+            start_time = time.monotonic()
+            result = await self.session.transcribe(filename)
+            print(f'STT seconds={time.monotonic() - start_time:.3f}')
+            if not result or self.session.closed:
+                return
+            request = copy(message)
+            request.content = '!' + result
+            answer = await self.chat.send_message(request)
+            if not self.session.closed:
+                await self.music.say(request, answer)
+        except SttError as error:
+            print(f'STT error={error}')
+        finally:
+            os.remove(filename)
 
     def _map_words_to_command(self, words):
         for word in words:
