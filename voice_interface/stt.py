@@ -1,8 +1,73 @@
-from vosk import KaldiRecognizer
+from vosk import KaldiRecognizer, Model
 from pydub import AudioSegment
 from pydub.silence import detect_nonsilent
 import json
 import io
+import asyncio
+from .transcription import QuotaExceeded, SttError, Transcriber, run_blocking
+
+
+class VoiceSession:
+    """Models and quota state live only for one guild voice connection."""
+
+    def __init__(self, cloud: Transcriber, local: Transcriber, detector_path: str):
+        self.cloud, self.local = cloud, local
+        self.detector_path = detector_path
+        self.detector = self.listener = None
+        self.closed = self.fallback = False
+        self.lock, self.record_lock = asyncio.Lock(), asyncio.Lock()
+
+    async def start(self):
+        async with self.lock:
+            if self.closed:
+                raise SttError('Voice session is closed')
+            if self.detector is None:
+                try:
+                    await self.cloud.start()
+                    await self.local.start()
+                    self.detector = await run_blocking(Model, self.detector_path)
+                    print('STT models=loaded')
+                except BaseException:
+                    await self.local.close()
+                    await self.cloud.close()
+                    raise
+
+    async def detect(self, wav):
+        async with self.lock:
+            if self.closed:
+                return ''
+            return await run_blocking(detect_words, wav, self.detector)
+
+    async def transcribe(self, filename: str) -> str:
+        async with self.lock:
+            if self.closed:
+                raise SttError('Voice session is closed')
+            wav = await run_blocking(lambda: AudioSegment.from_wav(filename).set_frame_rate(16000)
+                                     .export(io.BytesIO(), format='wav').getvalue())
+            if not self.fallback:
+                try:
+                    return await self.cloud.transcribe(wav)
+                except QuotaExceeded:
+                    self.fallback = True
+                    print('STT backend=local reason=quota')
+            return await self.local.transcribe(wav)
+
+    async def stop(self):
+        if self.listener:
+            listener, self.listener = self.listener, None
+            listener.cancel()
+            if listener.get_task():
+                await asyncio.gather(listener.get_task(), return_exceptions=True)
+
+    async def close(self):
+        self.closed = True
+        async with self.record_lock:
+            await self.stop()
+            async with self.lock:
+                self.detector = None
+                await self.local.close()
+                await self.cloud.close()
+                print('STT session=closed')
 
 
 

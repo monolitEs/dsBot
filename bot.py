@@ -1,7 +1,7 @@
 import os
+from pathlib import Path
 
 import discord
-from datetime import datetime 
 from discord.ext import commands
 from dotenv import load_dotenv
 from discord import Option
@@ -15,14 +15,10 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 chat = None
 music = None
 role_manager = None
-voice_command_interface = None
 voice_assistant = None
-async_task = None
+voice_sessions = {}
 
 def init(voice_assistant_bool):
-    if voice_assistant_bool:
-        raise RuntimeError("Распознавание речи временно отключено. Запустите бота с аргументом false.")
-
     load_dotenv()
 
     global chat
@@ -55,6 +51,42 @@ async def stopmessage(ctx):
 @bot.event
 async def on_ready():
     print(f"Бот {bot.user} готов!")
+
+
+async def get_voice_session(guild):
+    from voice_interface.stt import VoiceSession
+    from voice_interface.cloudflare_stt import CloudflareTranscriber
+    from voice_interface.local_stt import LocalTranscriber
+
+    if guild.id not in voice_sessions:
+        voice_sessions[guild.id] = VoiceSession(
+            CloudflareTranscriber(os.getenv('CLOUDFLARE_ACCOUNT_ID', ''), os.getenv('CLOUDFLARE_API_TOKEN', '')),
+            LocalTranscriber(Path(os.getenv('GIGAAM_MODEL_DIR', '/data/models/gigaam-ctc'))),
+            os.getenv('VOSK_MODEL_DIR', '/data/models/vosk-model-small-ru-0.22'))
+    session = voice_sessions[guild.id]
+    try:
+        await session.start()
+        return session
+    except BaseException:
+        if voice_sessions.get(guild.id) is session:
+            voice_sessions.pop(guild.id)
+        await session.close()
+        raise
+
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    if not voice_assistant or member.id != bot.user.id:
+        return
+    if after.channel is None:
+        session = voice_sessions.pop(member.guild.id, None)
+        if session:
+            await session.close()
+    elif before.channel is None:
+        try:
+            await get_voice_session(member.guild)
+        except Exception as error:
+            print(f'STT startup error={type(error).__name__}')
 
 # Обработка сообщений
 @bot.event
@@ -93,38 +125,47 @@ async def on_message(message):
 
 async def start_recording(message):
     from voice_interface.sinks import StreamSink
+    from voice_interface.core import VoiceCommandInterface
 
     vc = await music.join(message)
-
-    sink = StreamSink()
-
-    vc.start_recording(sink, lambda x, y: x, message.channel)
-
-    global async_task
-    async_task = await voice_command_interface.start_listening(message, sink, message.author.id)
+    if vc is None:
+        return
+    try:
+        session = await get_voice_session(message.guild)
+    except Exception as error:
+        print(f'STT startup error={type(error).__name__}')
+        return await message.reply('Не удалось загрузить STT. Проверьте настройки и файлы моделей.')
+    async with session.record_lock:
+        if session.closed or not vc.is_connected():
+            return
+        if vc.recording:
+            return await message.reply('Запись уже идёт!')
+        await session.stop()
+        sink = StreamSink()
+        vc.start_recording(sink, save_current_recording, message.channel)
+        interface = VoiceCommandInterface(bot, session, chat, music)
+        session.listener = await interface.start_listening(message, sink, message.author.id)
 
 async def save_current_recording(sink, channel):
-    # Копируем текущие данные и сбрасываем sink для новой записи
-    audio_data = sink.audio_data.copy()
-    sink.audio_data.clear()  # Очищаем, чтобы не дублировать данные
-
-    for user_id, audio in audio_data.items():
-        user = await channel.guild.fetch_member(user_id)
-        filename = f"{user.name}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.wav"
-        with open(filename, "wb") as f:
-            f.write(audio.file.getbuffer())
+    """Recording callback: the listener already consumed the StreamSink PCM."""
 
 async def stop_recording(message):
     voice_client = message.guild.voice_client
-    if not voice_client or not voice_client.recording:
-        await message.reply("Сейчас нет активной записи!")
+    session = voice_sessions.get(message.guild.id)
+    if not session and not voice_client:
+        await message.reply('Бот не подключён к голосовому каналу.')
         return
-    voice_client.stop_recording()
-
-    if async_task:
-        async_task.stop()
-
-    await message.reply("Запись остановлена!")
+    if session:
+        session.closed = True  # Reject pending starts before the first await.
+    try:
+        if voice_client:
+            await voice_client.disconnect()
+    finally:
+        if session:
+            if voice_sessions.get(message.guild.id) is session:
+                voice_sessions.pop(message.guild.id)
+            await session.close()
+    await message.reply('Запись остановлена, бот вышел из голосового канала.')
 
 
 

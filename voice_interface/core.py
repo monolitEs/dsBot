@@ -10,6 +10,9 @@ import subprocess
 import io
 import os
 import time
+from copy import copy
+from uuid import uuid4
+from .transcription import SttError
 
 
 def save_and_mono_wav(data: bytearray, sample_size = 2, channels = 2, sampling_rate = 48000):
@@ -23,7 +26,7 @@ def save_and_mono_wav(data: bytearray, sample_size = 2, channels = 2, sampling_r
     return segment.export(format="wav")
 
 def make_file(file_pattern, user_id):
-    matching_files = glob.glob(file_pattern)
+    matching_files = sorted(glob.glob(file_pattern))
     if matching_files:
         return files_merge(matching_files, user_id)
     else:
@@ -47,17 +50,12 @@ def files_merge(matching_files, user_id):
 
 class VoiceCommandInterface:
     
-    def __init__(self, bot, language_processor, word_detector, main_model, small_model, chat, music):
+    def __init__(self, bot, session, chat, music):
         self.bot = bot
-        self.language_processor = language_processor
-        self.word_detector = word_detector
-        self.main_model = main_model
-        self.small_model = small_model
+        self.session = session
         self.chat = chat
         self.music = music
         self.active_tasks = []
-        self.processing_flags = {}
-        self.processing_locks = {}
     
     def voice_command(self,function):
         """
@@ -70,7 +68,7 @@ class VoiceCommandInterface:
         return wrapper
 
     async def start_listening(self, message, sink, user_id, interval=2):
-        
+        recording_id = f'{message.guild.id}_{user_id}_{uuid4().hex}'
         @tasks.loop(seconds=interval)
         async def listening_task(message):
             try:
@@ -82,38 +80,42 @@ class VoiceCommandInterface:
                 data
             )
 
-            if self.processing_flags[user_id]:
+            words = await self.session.detect(wf) if data else ''
+            if self.session.closed:
                 return
-            
-            words = self.word_detector(wf, self.small_model)
             if len(words) != 0:
-                with open(f"{user_id}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.wav", "wb") as file:
+                with open(f"{recording_id}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S_%f')}.wav", "wb") as file:
                     file.write(wf.getbuffer())
             elif len(words) == 0:
 
-                async with self.processing_locks[user_id]:
-                    if self.processing_flags[user_id]:
-                        return
-                    self.processing_flags[user_id] = True
-
-                filename = make_file(f"{user_id}_*.wav", user_id)
+                filename = make_file(f"{recording_id}_*.wav", recording_id)
                 try:
                     if filename:
-                        start_time = time.time()
-                        result = self.language_processor(filename, self.main_model)
-                        print("%s Достаю слова из вав файла" % (time.time() - start_time))
-                        message.content = "!" + result
-
-                        await self.music.say(message, await self.chat.send_message(message))
+                        start_time = time.monotonic()
+                        result = await self.session.transcribe(filename)
+                        print(f'STT seconds={time.monotonic() - start_time:.3f}')
+                        if result and not self.session.closed:
+                            request = copy(message)
+                            request.content = '!' + result
+                            answer = await self.chat.send_message(request)
+                            if not self.session.closed:
+                                await self.music.say(request, answer)
+                except SttError as error:
+                    print(f'STT error={error}')
                 finally:
-                    async with self.processing_locks[user_id]:
-                        self.processing_flags[user_id] = False
+                    if filename:
+                        os.remove(filename)
                     
                 
                 
                 
 
             
+        @listening_task.after_loop
+        async def cleanup():
+            for path in glob.glob(f'{recording_id}_*.wav') + glob.glob(f'merged_{recording_id}.wav'):
+                os.remove(path)
+
         listening_task.start(message)
         return listening_task # call .stop() on the returned task to stop the task
 
