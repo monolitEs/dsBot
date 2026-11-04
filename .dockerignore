@@ -9,6 +9,8 @@
 !utils/**
 !voice_interface/
 !voice_interface/**
+!vosk-model-small-ru/
+!vosk-model-small-ru/**
 !docker/
 !docker/**
 **/__pycache__/**

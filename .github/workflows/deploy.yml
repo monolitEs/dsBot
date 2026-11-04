@@ -25,6 +25,7 @@ jobs:
       DOCKER_HOST: unix:///var/run/docker.sock
       COMPOSE_PROJECT_NAME: dsbot
       DSBOT_DATA_DIR: ${{ vars.DSBOT_DATA_DIR }}
+      VOICE_ASSISTANT: ${{ vars.VOICE_ASSISTANT || 'true' }}
 
     steps:
       - name: Checkout pushed commit
@@ -37,4 +38,6 @@ jobs:
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: bash .github/scripts/deploy.sh

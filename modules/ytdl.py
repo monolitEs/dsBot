@@ -73,16 +73,17 @@ class Music:
 
     async def join(self, message):
         if message.author.voice is None:
-            return await message.reply("Вы не в голосовом канале!")
+            await message.reply("Вы не в голосовом канале!")
+            return
 
         channel = message.author.voice.channel
         voice_client = discord.utils.get(self.bot.voice_clients, guild=message.guild)
         if voice_client is None:
-            self.guild_voice_client[message.guild] = await channel.connect()
-            return self.guild_voice_client[message.guild]
+            voice_client = await channel.connect()
         elif voice_client.channel != channel:
-            self.guild_voice_client[message.guild] = await voice_client.move_to(channel)
-            return self.guild_voice_client[message.guild]
+            await voice_client.move_to(channel)
+        self.guild_voice_client[message.guild] = voice_client
+        return voice_client
 
     async def leave(self, message):
         voice_client = discord.utils.get(self.bot.voice_clients, guild=message.guild)

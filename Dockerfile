@@ -8,10 +8,23 @@ RUN curl -fsSL https://codeload.github.com/bol-van/zapret/tar.gz/refs/tags/v72.1
     && mkdir /src && tar -xzf /tmp/zapret.tar.gz --strip-components=1 -C /src \
     && make -C /src/nfq
 
+FROM debian:bookworm-slim AS stt-models
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /models/gigaam-ctc
+ENV GIGAAM_SOURCE=https://huggingface.co/csukuangfj/sherpa-onnx-nemo-ctc-punct-giga-am-v3-russian-2025-12-16/resolve/4fb5407ff028a69fec516cdf4c10fac9ddea7c16
+RUN curl -fsSL "$GIGAAM_SOURCE/model.int8.onnx" -o model.int8.onnx \
+    && echo 'd5fea8df94263c285e54b21e5774b707c707192d3bdbeffd7b1eb07fb6743b35  model.int8.onnx' | sha256sum -c -
+RUN curl -fsSL "$GIGAAM_SOURCE/tokens.txt" -o tokens.txt \
+    && echo '142de7570b3de5b3035ce111a89c228e80e6085273731d944093ddf24fa539cd  tokens.txt' | sha256sum -c -
+RUN curl -fsSL "$GIGAAM_SOURCE/LICENSE" -o LICENSE \
+    && echo 'f00de6715714c7a63d08639cdbfaa40224eefc407302614bd19f1a8b98c875aa  LICENSE' | sha256sum -c -
+COPY vosk-model-small-ru/ /models/vosk-model-small-ru-0.22/
+
 FROM python:3.11-slim-bookworm AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash ca-certificates ffmpeg iptables libcap2 libmnl0 libnetfilter-queue1 \
-    libnfnetlink0 libopus0 mawk util-linux zlib1g \
+    libnfnetlink0 libopus0 libgomp1 mawk util-linux zlib1g \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 bot && useradd --uid 10001 --gid bot --home-dir /data bot \
     && install -d -o bot -g bot /data
@@ -27,6 +40,9 @@ ENTRYPOINT ["/usr/local/bin/bot-entrypoint"]
 FROM runtime AS bot
 COPY requirements.txt /app/requirements.txt
 RUN python -m pip install --no-cache-dir -r /app/requirements.txt
+COPY --from=stt-models /models/ /opt/models/
+ENV GIGAAM_MODEL_DIR=/opt/models/gigaam-ctc \
+    VOSK_MODEL_DIR=/opt/models/vosk-model-small-ru-0.22
 COPY bot.py startBot.py /app/
 COPY modules/ /app/modules/
 COPY utils/ /app/utils/
