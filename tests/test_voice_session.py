@@ -295,7 +295,7 @@ class BotVoiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(10, app.voice_sessions)
 
     async def test_repeated_record_does_not_start_second_listener(self):
-        vc = SimpleNamespace(recording=True, is_connected=lambda: True)
+        vc = SimpleNamespace(is_recording=lambda: True, is_connected=lambda: True)
         session = SimpleNamespace(record_lock=asyncio.Lock(), closed=False)
         message = SimpleNamespace(reply=AsyncMock(), guild=SimpleNamespace(voice_client=vc))
         with patch.object(app, 'music', SimpleNamespace(join=AsyncMock(return_value=vc))), \

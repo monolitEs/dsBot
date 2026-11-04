@@ -138,16 +138,19 @@ async def start_recording(message):
     async with session.record_lock:
         if session.closed or not vc.is_connected():
             return
-        if vc.recording:
+        if vc.is_recording():
             return await message.reply('Запись уже идёт!')
         await session.stop()
         sink = StreamSink()
-        vc.start_recording(sink, save_current_recording, message.channel)
+        sink.init(vc)
+        vc.start_recording(sink, recording_finished)
         interface = VoiceCommandInterface(bot, session, chat, music)
         session.listener = await interface.start_listening(message, sink, message.author.id)
 
-async def save_current_recording(sink, channel):
-    """Recording callback: the listener already consumed the StreamSink PCM."""
+def recording_finished(error):
+    """Pycord invokes this synchronously with an optional reader exception."""
+    if error is not None:
+        print(f'STT receive error={type(error).__name__}')
 
 async def stop_recording(message):
     voice_client = message.guild.voice_client
