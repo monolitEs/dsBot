@@ -120,16 +120,14 @@ class Music:
     async def say(self, message, text):
         if message.author.voice is None:
              return await message.reply("Вы не в голосовом канале!")
-        start_time = time.time()
         vc = self.guild_voice_client[message.guild]
-        print("%s Время получения гильдии" % (time.time() - start_time))
         
-        start_time = time.time()
+        start_time = time.monotonic()
         tts = gTTS(text, lang='ru')
         tts.save('answer.mp3')
-        print("%s Время текста в голос" % (time.time() - start_time))
+        print(f'TTS: Время преобразования текста в голос: {time.monotonic() - start_time:.3f} с')
                         
-        vc.play(discord.FFmpegPCMAudio("answer.mp3"))
+        vc.play(discord.FFmpegPCMAudio("answer.mp3", before_options='-loglevel error'))
         
             
 

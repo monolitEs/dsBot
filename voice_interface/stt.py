@@ -26,7 +26,7 @@ class VoiceSession:
                     await self.cloud.start()
                     await self.local.start()
                     self.detector = await run_blocking(Model, self.detector_path)
-                    print('STT models=loaded')
+                    print('STT: Модели распознавания речи загружены, бот готов слушать')
                 except BaseException:
                     await self.local.close()
                     await self.cloud.close()
@@ -67,7 +67,6 @@ class VoiceSession:
                 self.detector = None
                 await self.local.close()
                 await self.cloud.close()
-                print('STT session=closed')
 
 
 
