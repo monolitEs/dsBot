@@ -81,12 +81,11 @@ def detect_words(wf, model, framerate = 16000):
     
     
     rec = KaldiRecognizer(model, framerate)
-    rec.AcceptWaveform(audio.raw_data)
-    
-    result_dict = json.loads(rec.Result())
-            
-    
-    return result_dict['text']
+    completed = []
+    if rec.AcceptWaveform(audio.raw_data):
+        completed.append(json.loads(rec.Result())['text'])
+    completed.append(json.loads(rec.FinalResult())['text'])
+    return ' '.join(text for text in completed if text)
 
 def speech_to_text(filename, model):
     

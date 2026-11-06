@@ -1,0 +1,12 @@
+--- pyproject.toml
++++ pyproject.toml (test image)
+@@ -55,6 +55,9 @@
+     "discord.ext.bridge",
+     "discord.bin",
+     "discord.voice",
++    "discord.voice.receive",
++    "discord.voice.packets",
++    "discord.voice.utils",
+ ]
+ 
+ [tool.setuptools.dynamic]

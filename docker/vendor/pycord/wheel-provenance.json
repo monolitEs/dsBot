@@ -1,0 +1,11 @@
+{
+  "file": "py_cord-2.8.1.dev0+g10a5e8c-py3-none-any.whl",
+  "sha256": "7de885e727f6b9df42f6ae1f2d375d0cb2431d2c24d62f16dbfd3431fd198c8a",
+  "bytes": 1265878,
+  "source_sha256": "f65c2b25d004fb847497334d0e7bbede3158c2cda9f3769e922e8e2bc6abbde8",
+  "revision": "10a5e8cf13bd8db21f95baf62cf866056d1e1091",
+  "changes": "Three package names in pyproject.toml only; no SDK/crypto source changes",
+  "matches_tested_sdk_python_files": 175,
+  "source_date_epoch": 315532800,
+  "production_install": false
+}
