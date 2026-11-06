@@ -61,8 +61,7 @@ async def get_voice_session(guild):
     if guild.id not in voice_sessions:
         voice_sessions[guild.id] = VoiceSession(
             CloudflareTranscriber(os.getenv('CLOUDFLARE_ACCOUNT_ID', ''), os.getenv('CLOUDFLARE_API_TOKEN', '')),
-            LocalTranscriber(Path(os.getenv('GIGAAM_MODEL_DIR', '/data/models/gigaam-ctc'))),
-            os.getenv('VOSK_MODEL_DIR', '/data/models/vosk-model-small-ru-0.22'))
+            LocalTranscriber(Path(os.getenv('GIGAAM_MODEL_DIR', '/data/models/gigaam-ctc'))))
     session = voice_sessions[guild.id]
     try:
         await session.start()

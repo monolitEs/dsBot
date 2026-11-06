@@ -1,18 +1,15 @@
-from vosk import KaldiRecognizer, Model
 from pydub import AudioSegment
-from pydub.silence import detect_nonsilent
-import json
 import io
 import asyncio
+from .vad import SpeechDetector
 from .transcription import QuotaExceeded, SttError, Transcriber, run_blocking
 
 
 class VoiceSession:
     """Models and quota state live only for one guild voice connection."""
 
-    def __init__(self, cloud: Transcriber, local: Transcriber, detector_path: str):
+    def __init__(self, cloud: Transcriber, local: Transcriber):
         self.cloud, self.local = cloud, local
-        self.detector_path = detector_path
         self.detector = self.listener = None
         self.closed = self.fallback = False
         self.lock, self.record_lock = asyncio.Lock(), asyncio.Lock()
@@ -25,18 +22,23 @@ class VoiceSession:
                 try:
                     await self.cloud.start()
                     await self.local.start()
-                    self.detector = await run_blocking(Model, self.detector_path)
+                    self.detector = await run_blocking(SpeechDetector)
                     print('STT: Модели распознавания речи загружены, бот готов слушать')
                 except BaseException:
                     await self.local.close()
                     await self.cloud.close()
                     raise
 
-    async def detect(self, wav):
+    async def detect(self, pcm, now):
         async with self.lock:
             if self.closed:
-                return ''
-            return await run_blocking(detect_words, wav, self.detector)
+                return []
+            return await run_blocking(self.detector.feed, pcm, now)
+
+    async def reset_detector(self):
+        async with self.lock:
+            if self.detector is not None:
+                await run_blocking(self.detector.reset)
 
     async def transcribe(self, filename: str) -> str:
         async with self.lock:
@@ -67,67 +69,3 @@ class VoiceSession:
                 self.detector = None
                 await self.local.close()
                 await self.cloud.close()
-
-
-
-
-def detect_words(wf, model, framerate = 16000):
-    """Just a function for taking an audio stream and retrieving words from VOSK kaldi"""
-    
-    audio = AudioSegment.from_file(wf, format="wav")
-    audio = audio.set_frame_rate(16000)
-    
-    
-    
-    rec = KaldiRecognizer(model, framerate)
-    completed = []
-    if rec.AcceptWaveform(audio.raw_data):
-        completed.append(json.loads(rec.Result())['text'])
-    completed.append(json.loads(rec.FinalResult())['text'])
-    return ' '.join(text for text in completed if text)
-
-def speech_to_text(filename, model):
-    
-    audio = AudioSegment.from_wav(filename)
-    
-    nonsilent_ranges = detect_nonsilent(audio, min_silence_len=200, silence_thresh=-50)
-    
-    if nonsilent_ranges:
-        first_sound_start = nonsilent_ranges[0][0]
-        start_trim = max(0, first_sound_start - 500)
-
-        trimmed_audio = audio[start_trim:]
-
-        # Сохраняем в памяти (в формат WAV)
-        trimmed_audio.export(filename, format="wav")
-       
-  
-    result = model.transcribe(filename, language="ru")
-    return result["text"]
-    
-    
-    """
-    model = Model(lang="en-gb")
-    commands = str(commands).replace("'", '"')
-
-    rec = KaldiRecognizer(model, framerate, 
-    commands)
-
-    transcription = []
-
-    rec.SetWords(True)
-
-    while True:
-        data = wf.read(4000)
-        if len(data) == 0:
-            break
-        if rec.AcceptWaveform(data):
-            result_dict = json.loads(rec.Result())
-            transcription.append(result_dict.get("text", ""))
-
-    final_result = json.loads(rec.FinalResult())
-    transcription.append(final_result.get("text", ""))
-
-    transcription_text = ' '.join(transcription)
-    return transcription_text
-    """

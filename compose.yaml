@@ -11,7 +11,6 @@ services:
       CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-}
       CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
       GIGAAM_MODEL_DIR: /opt/models/gigaam-ctc
-      VOSK_MODEL_DIR: /opt/models/vosk-model-small-ru-0.22
     volumes:
       - type: bind
         source: ${DSBOT_DATA_DIR:?Set DSBOT_DATA_DIR to an absolute path on mercury}
