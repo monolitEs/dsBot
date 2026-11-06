@@ -1,11 +1,6 @@
 from discord import sinks
 import io
-
-class StreamAudioData(sinks.AudioData):
-    def __init__(self, file):
-        super().__init__(file)
-    
-        self.last_read_byte = 0
+import threading
 
 class StreamSink(sinks.WaveSink):
     # Pycord 2.8's reader expects the sink event/tree protocol even for a leaf.
@@ -13,6 +8,7 @@ class StreamSink(sinks.WaveSink):
 
     def __init__(self, *, filters=None):
         super().__init__(filters=filters)
+        self._buffer_lock = threading.Lock()
         self.received_frames = 0
         self.unassigned_frames = 0
 
@@ -31,25 +27,28 @@ class StreamSink(sinks.WaveSink):
 
     @sinks.Filters.container
     def _write_pcm(self, data, user):
-        if user not in self.audio_data:
-            file = io.BytesIO()
-            self.audio_data.update({user: StreamAudioData(file)})
+        with self._buffer_lock:
+            if self.finished:
+                return
+            if user not in self.audio_data:
+                self.audio_data[user] = sinks.AudioData(io.BytesIO())
+            self.audio_data[user].write(data)
 
-        file = self.audio_data[user]
-        file.write(data)
+    def read(self, user_id) -> bytes:
+        """Consume this participant's pending PCM without retaining its history."""
+        with self._buffer_lock:
+            audio = self.audio_data.get(user_id)
+            if audio is None:
+                raise KeyError("User not found")
+            data = audio.file.getvalue()
+            audio.file.seek(0)
+            audio.file.truncate(0)
+            return data
 
-    def read(self, user_id, full=False, starting_point=0) -> bytearray:
-        audio = self.audio_data.get(user_id)
-        if not audio:
-            raise KeyError("User not found")
-        
-        data = audio.file.getvalue()
-
-        if not full:
-            if not starting_point:
-                starting_point = audio.last_read_byte
-            data = data[starting_point:]
-        
-        audio.last_read_byte = len(audio.file.getvalue())
-
-        return data
+    def cleanup(self):
+        # Streaming consumers own the drained PCM; no final WAV is needed.
+        with self._buffer_lock:
+            self.finished = True
+            for audio in self.audio_data.values():
+                audio.file.close()
+            self.audio_data.clear()

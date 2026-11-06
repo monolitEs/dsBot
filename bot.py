@@ -141,7 +141,7 @@ async def start_recording(message):
         if vc.is_recording():
             return await message.reply('Запись уже идёт!')
         await session.stop()
-        sink = StreamSink()
+        sink = StreamSink(filters={'users': [message.author.id]})
         vc.start_recording(sink, recording_finished, None)
         interface = VoiceCommandInterface(bot, session, chat, music)
         session.listener = await interface.start_listening(message, sink, message.author.id)
