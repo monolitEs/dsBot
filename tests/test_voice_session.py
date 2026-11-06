@@ -224,21 +224,20 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         chat.send_message.assert_awaited_once()
         music.say.assert_awaited_once()
 
-    async def test_tts_logs_synthesis_time_and_keeps_ffmpeg_errors_visible(self):
+    async def test_tts_uses_stream_source_without_a_shared_audio_file(self):
         guild = object()
         message = SimpleNamespace(guild=guild, author=SimpleNamespace(voice=object()))
         music = Music(None, None)
         voice = Mock()
+        voice.is_playing.return_value = False
+        voice.is_paused.return_value = False
         music.guild_voice_client[guild] = voice
         output = io.StringIO()
-        with patch('modules.ytdl.gTTS') as tts, \
-                patch('modules.ytdl.discord.FFmpegPCMAudio') as source, redirect_stdout(output):
+        with patch('modules.ytdl.StreamingTTS') as source, redirect_stdout(output):
             await music.say(message, 'spoken answer')
-        tts.assert_called_once_with('spoken answer', lang='ru')
-        tts.return_value.save.assert_called_once_with('answer.mp3')
-        source.assert_called_once_with('answer.mp3', before_options='-loglevel error')
+        source.assert_called_once_with('spoken answer')
         voice.play.assert_called_once_with(source.return_value)
-        self.assertRegex(output.getvalue(), r'^TTS: Время преобразования текста в голос: \d+\.\d{3} с\n$')
+        self.assertEqual(output.getvalue(), '')
 
     async def test_closed_session_rejects_audio(self):
         session = self.make_session()
