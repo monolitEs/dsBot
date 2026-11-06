@@ -116,7 +116,7 @@ class Music:
             voice_client.play(player, after=lambda e: self.check_queue(message.author, message.guild.id))
             #await message.reply(reply)
             
-    async def say(self, message, text):
+    async def say(self, message, text, *, wait=False):
         if message.author.voice is None:
              return await message.reply("Вы не в голосовом канале!")
         vc = self.guild_voice_client[message.guild]
@@ -126,10 +126,25 @@ class Music:
             return
         source = StreamingTTS(text)
         try:
-            vc.play(source)
+            if wait:
+                finished = vc.play(source, wait_finish=True)
+                player = vc._player  # Pinned Pycord has no playback-only stop API.
+            else:
+                vc.play(source)
         except Exception:
             source.cleanup()
             raise
+        if wait:
+            try:
+                error = await asyncio.shield(finished)
+            except asyncio.CancelledError:
+                # VoiceClient.stop() also stops the receive sink in pinned Pycord.
+                player.stop()
+                source.cleanup()
+                await finished
+                raise
+            if error:
+                print(f'TTS: Ошибка воспроизведения: {type(error).__name__}')
         
             
 

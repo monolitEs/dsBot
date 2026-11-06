@@ -9,7 +9,7 @@ import tempfile
 import threading
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, call, patch
 
 AVAILABLE = all(importlib.util.find_spec(name) for name in ['discord', 'pydub', 'sherpa_onnx'])
 if AVAILABLE:
@@ -199,7 +199,8 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         chat = SimpleNamespace(send_message=AsyncMock(return_value='answer'))
         music = SimpleNamespace(say=AsyncMock())
         interface = VoiceCommandInterface(None, session, chat, music)
-        sink = SimpleNamespace(read=Mock(side_effect=[b'\0' * 1920, b'']))
+        sink = SimpleNamespace(read=Mock(side_effect=[b'\0' * 1920, b'']),
+                               set_listening=Mock())
         response = io.BytesIO(b'{"success":true,"result":{"text":"hello"}}')
         output = io.StringIO()
         with tempfile.TemporaryDirectory() as directory, chdir(directory), \
@@ -216,7 +217,8 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         request = chat.send_message.call_args.args[0]
         self.assertEqual(request.content, '!hello')
         self.assertEqual(message.content, '!record')
-        music.say.assert_awaited_once_with(request, 'answer')
+        music.say.assert_awaited_once_with(request, 'answer', wait=True)
+        self.assertEqual(sink.set_listening.call_args_list, [call(False), call(True)])
         lines = [line for line in output.getvalue().splitlines() if not line.startswith('VAD:')]
         self.assertEqual(len(lines), 4)
         self.assertRegex(lines[0], r'^STT: Время преобразования голоса в текст: \d+\.\d{3} с$')
