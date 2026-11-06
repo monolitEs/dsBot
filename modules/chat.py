@@ -86,7 +86,3 @@ class Chat:
         user_messages.messages.append(user_messages.character_name + ": " + reply)
 
         return reply
-            
-    #Просто отправка сообщения        
-    async def custom_message(self, message, character):
-        return self.config.custom_message(message, character)

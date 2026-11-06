@@ -19,17 +19,6 @@ class VoiceCommandInterface:
         self.session = session
         self.chat = chat
         self.music = music
-        self.active_tasks = []
-    
-    def voice_command(self,function):
-        """
-        Decorator for registering function as a voice command.
-        """
-        print("decorator triggered")
-        self.add_command(function)
-        def wrapper(*args, **kwargs):
-            return args
-        return wrapper
 
     async def start_listening(self, message, sink, user_id, interval=0.05, *,
                               listen_while_speaking=False):
@@ -97,16 +86,3 @@ class VoiceCommandInterface:
             print(f'STT error={error}')
         finally:
             os.remove(filename)
-
-    def _map_words_to_command(self, words):
-        for word in words:
-            command_func = self.commands.get(word)
-            if command_func:
-                print(f"Found command {command_func}")
-                return command_func
-
-        return None
-
-    def add_command(self, command):
-        self.commands[command.__name__] = command
-        return command
