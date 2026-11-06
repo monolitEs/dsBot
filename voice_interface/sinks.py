@@ -28,9 +28,6 @@ class StreamSink(sinks.WaveSink):
             self._write_pcm(data.pcm, user.id)
         else:
             self.unassigned_frames += 1
-        if self.received_frames == 1 or self.received_frames % 250 == 0:
-            print(f'STT receive frames={self.received_frames} '
-                  f'unassigned={self.unassigned_frames} pcm_bytes={len(data.pcm)}')
 
     @sinks.Filters.container
     def _write_pcm(self, data, user):

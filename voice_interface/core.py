@@ -30,12 +30,6 @@ def write_wav(filename, data):
         file.write(data)
 
 
-def log_audio(data, words=None):
-    level = audioop.rms(data, 2) if data else 0
-    detected = 'not_checked' if words is None else str(bool(words)).lower()
-    print(f'STT audio bytes={len(data)} rms={level} words={detected}')
-
-
 def make_file(file_pattern, user_id):
     matching_files = sorted(glob.glob(file_pattern))
     if matching_files:
@@ -85,7 +79,6 @@ class VoiceCommandInterface:
             try:
                 data = sink.read(user_id)
             except KeyError:
-                log_audio(b'')
                 return
             
             wf = save_and_mono_wav(
@@ -93,10 +86,10 @@ class VoiceCommandInterface:
             )
 
             words = await self.session.detect(wf) if data else ''
-            log_audio(data, words)
             if self.session.closed:
                 return
             if words:
+                print('STT: Обнаружена речь')
                 filename = f"{recording_id}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S_%f')}.wav"
                 await run_blocking(write_wav, filename, wf.getbuffer())
             else:
@@ -121,12 +114,17 @@ class VoiceCommandInterface:
         try:
             start_time = time.monotonic()
             result = await self.session.transcribe(filename)
-            print(f'STT seconds={time.monotonic() - start_time:.3f}')
+            print(f'STT: Время преобразования голоса в текст: {time.monotonic() - start_time:.3f} с')
             if not result or self.session.closed:
                 return
+            backend = 'GigaAM' if self.session.fallback else 'Cloudflare'
+            print(f'STT ({backend}): {result}')
             request = copy(message)
             request.content = '!' + result
+            start_time = time.monotonic()
             answer = await self.chat.send_message(request)
+            print(f'LLM: Время ответа: {time.monotonic() - start_time:.3f} с')
+            print(f'LLM: {answer}')
             if not self.session.closed:
                 await self.music.say(request, answer)
         except SttError as error:

@@ -22,15 +22,22 @@ if AVAILABLE:
 
 @unittest.skipUnless(AVAILABLE, 'Requires bot runtime dependencies')
 class SessionTests(unittest.IsolatedAsyncioTestCase):
-    def test_audio_diagnostics_log_only_size_level_and_speech_flag(self):
-        from voice_interface.core import log_audio
+    async def test_idle_listener_and_repeated_close_produce_no_logs(self):
+        session = self.make_session()
+        session.detect = AsyncMock(return_value='')
+        message = SimpleNamespace(guild=SimpleNamespace(id=10))
+        sink = SimpleNamespace(read=Mock(side_effect=[KeyError(), b'', b'\0' * 1920]))
+        interface = VoiceCommandInterface(None, session, None, None)
         output = io.StringIO()
-        with redirect_stdout(output):
-            log_audio(b'\xe8\x03\x18\xfc' * 2, 'fake-secret')
-            log_audio(b'')
-        self.assertIn('STT audio bytes=8 rms=1000 words=true', output.getvalue())
-        self.assertIn('STT audio bytes=0 rms=0 words=not_checked', output.getvalue())
-        self.assertNotIn('fake-secret', output.getvalue())
+        with tempfile.TemporaryDirectory() as directory, chdir(directory), \
+                patch('discord.ext.tasks.Loop.start'), redirect_stdout(output):
+            loop = await interface.start_listening(message, sink, 7)
+            for _ in range(3):
+                await loop.coro(message)
+            await session.close()
+            await session.close()
+        self.assertEqual(output.getvalue(), '')
+        session.detect.assert_awaited_once()
 
     def make_session(self):
         cloud = SimpleNamespace(start=AsyncMock(), transcribe=AsyncMock(return_value='cloud'), close=AsyncMock())
@@ -168,8 +175,10 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         interface = VoiceCommandInterface(None, session, chat, music)
         sink = SimpleNamespace(read=Mock(side_effect=[b'\0' * 1920, b'']))
         response = io.BytesIO(b'{"success":true,"result":{"text":"hello"}}')
+        output = io.StringIO()
         with tempfile.TemporaryDirectory() as directory, chdir(directory), \
-                patch('discord.ext.tasks.Loop.start'), patch('urllib.request.urlopen', return_value=response) as http:
+                patch('discord.ext.tasks.Loop.start'), patch('urllib.request.urlopen', return_value=response) as http, \
+                redirect_stdout(output):
             loop = await interface.start_listening(message, sink, 7)
             await loop.coro(message)
             http.assert_not_called()  # Keep collecting until the original pause rule fires.
@@ -182,6 +191,54 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.content, '!hello')
         self.assertEqual(message.content, '!record')
         music.say.assert_awaited_once_with(request, 'answer')
+        lines = output.getvalue().splitlines()
+        self.assertEqual(len(lines), 5)
+        self.assertEqual(lines[0], 'STT: Обнаружена речь')
+        self.assertRegex(lines[1], r'^STT: Время преобразования голоса в текст: \d+\.\d{3} с$')
+        self.assertEqual(lines[2], 'STT (Cloudflare): hello')
+        self.assertRegex(lines[3], r'^LLM: Время ответа: \d+\.\d{3} с$')
+        self.assertEqual(lines[4], 'LLM: answer')
+        self.assertNotIn('detected words', output.getvalue())
+
+    async def test_empty_stt_stops_before_chat_and_fallback_uses_correct_label(self):
+        session = self.make_session()
+        session.transcribe = AsyncMock(side_effect=['', 'local words'])
+        session.fallback = True
+        message = SimpleNamespace(content='!record')
+        chat = SimpleNamespace(send_message=AsyncMock(return_value='local answer'))
+        music = SimpleNamespace(say=AsyncMock())
+        interface = VoiceCommandInterface(None, session, chat, music)
+        output = io.StringIO()
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(output):
+            merged = Path(directory) / 'merged.wav'
+            merged.touch()
+            await interface._process_recording(message, str(merged))
+            chat.send_message.assert_not_called()
+            music.say.assert_not_called()
+            self.assertFalse(merged.exists())
+            merged.touch()
+            await interface._process_recording(message, str(merged))
+            self.assertFalse(merged.exists())
+        self.assertIn('STT (GigaAM): local words', output.getvalue())
+        self.assertNotIn('Cloudflare', output.getvalue())
+        chat.send_message.assert_awaited_once()
+        music.say.assert_awaited_once()
+
+    async def test_tts_logs_synthesis_time_and_keeps_ffmpeg_errors_visible(self):
+        guild = object()
+        message = SimpleNamespace(guild=guild, author=SimpleNamespace(voice=object()))
+        music = Music(None, None)
+        voice = Mock()
+        music.guild_voice_client[guild] = voice
+        output = io.StringIO()
+        with patch('modules.ytdl.gTTS') as tts, \
+                patch('modules.ytdl.discord.FFmpegPCMAudio') as source, redirect_stdout(output):
+            await music.say(message, 'spoken answer')
+        tts.assert_called_once_with('spoken answer', lang='ru')
+        tts.return_value.save.assert_called_once_with('answer.mp3')
+        source.assert_called_once_with('answer.mp3', before_options='-loglevel error')
+        voice.play.assert_called_once_with(source.return_value)
+        self.assertRegex(output.getvalue(), r'^TTS: Время преобразования текста в голос: \d+\.\d{3} с\n$')
 
     async def test_closed_session_rejects_audio(self):
         session = self.make_session()
