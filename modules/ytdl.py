@@ -1,8 +1,7 @@
 import discord
 import yt_dlp
 import asyncio
-import time
-from gtts import gTTS
+from modules.tts import StreamingTTS
 
 #Класс загрузки видосика
 class YTDLSource(discord.PCMVolumeTransformer):
@@ -121,13 +120,16 @@ class Music:
         if message.author.voice is None:
              return await message.reply("Вы не в голосовом канале!")
         vc = self.guild_voice_client[message.guild]
-        
-        start_time = time.monotonic()
-        tts = gTTS(text, lang='ru')
-        tts.save('answer.mp3')
-        print(f'TTS: Время преобразования текста в голос: {time.monotonic() - start_time:.3f} с')
-                        
-        vc.play(discord.FFmpegPCMAudio("answer.mp3", before_options='-loglevel error'))
+
+        if vc.is_playing() or vc.is_paused():
+            print('TTS: Ответ пропущен, воспроизведение уже занято')
+            return
+        source = StreamingTTS(text)
+        try:
+            vc.play(source)
+        except Exception:
+            source.cleanup()
+            raise
         
             
 
