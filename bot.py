@@ -142,13 +142,13 @@ async def start_recording(message):
             return await message.reply('Запись уже идёт!')
         await session.stop()
         sink = StreamSink()
-        sink.init(vc)
-        vc.start_recording(sink, recording_finished)
+        vc.start_recording(sink, recording_finished, None)
         interface = VoiceCommandInterface(bot, session, chat, music)
         session.listener = await interface.start_listening(message, sink, message.author.id)
 
-def recording_finished(error):
-    """Pycord invokes this synchronously with an optional reader exception."""
+def recording_finished(sink, _context):
+    """PR3159 passes the sink; an extra argument avoids its empty-args bug."""
+    error = getattr(sink.client._reader, 'error', None)
     if error is not None:
         print(f'STT receive error={type(error).__name__}')
 

@@ -39,7 +39,8 @@ ENTRYPOINT ["/usr/local/bin/bot-entrypoint"]
 
 FROM runtime AS bot
 COPY requirements.txt /app/requirements.txt
-RUN python -m pip install --no-cache-dir -r /app/requirements.txt
+COPY docker/vendor/pycord/ /app/docker/vendor/pycord/
+RUN cd /app && python -m pip install --no-cache-dir -r requirements.txt
 COPY --from=stt-models /models/ /opt/models/
 ENV GIGAAM_MODEL_DIR=/opt/models/gigaam-ctc \
     VOSK_MODEL_DIR=/opt/models/vosk-model-small-ru-0.22

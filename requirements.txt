@@ -1,4 +1,6 @@
-py-cord[voice]==2.8.1
+file:./docker/vendor/pycord/py_cord-2.8.1.dev0+g10a5e8c-py3-none-any.whl#sha256=7de885e727f6b9df42f6ae1f2d375d0cb2431d2c24d62f16dbfd3431fd198c8a
+py-cord[voice]==2.8.1.dev0+g10a5e8c
+davey==0.1.6
 gTTS==2.5.4
 openai==1.91.0
 pydub==0.25.1

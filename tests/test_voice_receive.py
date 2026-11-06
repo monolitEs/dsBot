@@ -47,6 +47,7 @@ class VoiceReceiveTests(unittest.IsolatedAsyncioTestCase):
         with patch('threading.Thread.start'), \
                 patch.object(app, 'music', SimpleNamespace(join=AsyncMock(return_value=client))), \
                 patch.object(app, 'get_voice_session', AsyncMock(return_value=session)), \
+                patch.object(app, 'recording_finished', Mock(wraps=app.recording_finished)) as finished, \
                 patch('voice_interface.core.VoiceCommandInterface.start_listening',
                       AsyncMock(return_value=listener)) as listen:
             try:
@@ -62,14 +63,18 @@ class VoiceReceiveTests(unittest.IsolatedAsyncioTestCase):
                 listen.assert_awaited_once()
                 message.reply.assert_awaited_once_with('Запись уже идёт!')
                 client.stop()
+                finished.assert_called_once_with(first_sink, None)
                 self.assertFalse(client.is_recording())
                 await app.start_recording(message)
                 self.assertTrue(client.is_recording())
                 self.assertIsNot(client._reader.sink, first_sink)
+                second_sink = client._reader.sink
                 self.assertEqual(listen.await_count, 2)
             finally:
                 client.stop()
         self.assertFalse(client.is_recording())
+        self.assertEqual(finished.call_count, 2)
+        finished.assert_called_with(second_sink, None)
         self.assertEqual(client._connection.add_socket_listener.call_count, 2)
         self.assertEqual(client._connection.remove_socket_listener.call_count, 2)
 
@@ -120,9 +125,11 @@ class VoiceReceiveTests(unittest.IsolatedAsyncioTestCase):
         output = io.StringIO()
         self.assertFalse(inspect.iscoroutinefunction(app.recording_finished))
         with redirect_stdout(output):
-            app.recording_finished(None)
+            sink = SimpleNamespace(client=SimpleNamespace(_reader=SimpleNamespace(error=None)))
+            app.recording_finished(sink, None)
             self.assertEqual(output.getvalue(), '')
-            app.recording_finished(RuntimeError('fake-secret'))
+            sink.client._reader.error = RuntimeError('fake-secret')
+            app.recording_finished(sink, None)
         self.assertIn('STT receive error=RuntimeError', output.getvalue())
         self.assertNotIn('fake-secret', output.getvalue())
 
