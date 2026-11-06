@@ -9,8 +9,8 @@
 !utils/**
 !voice_interface/
 !voice_interface/**
-!vosk-model-small-ru/
-!vosk-model-small-ru/**
+!models/
+!models/silero_vad.onnx
 !docker/
 !docker/**
 **/__pycache__/**

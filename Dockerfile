@@ -19,7 +19,6 @@ RUN curl -fsSL "$GIGAAM_SOURCE/tokens.txt" -o tokens.txt \
     && echo '142de7570b3de5b3035ce111a89c228e80e6085273731d944093ddf24fa539cd  tokens.txt' | sha256sum -c -
 RUN curl -fsSL "$GIGAAM_SOURCE/LICENSE" -o LICENSE \
     && echo 'f00de6715714c7a63d08639cdbfaa40224eefc407302614bd19f1a8b98c875aa  LICENSE' | sha256sum -c -
-COPY vosk-model-small-ru/ /models/vosk-model-small-ru-0.22/
 
 FROM python:3.11-slim-bookworm AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -42,8 +41,8 @@ COPY requirements.txt /app/requirements.txt
 COPY docker/vendor/pycord/ /app/docker/vendor/pycord/
 RUN cd /app && python -m pip install --no-cache-dir -r requirements.txt
 COPY --from=stt-models /models/ /opt/models/
-ENV GIGAAM_MODEL_DIR=/opt/models/gigaam-ctc \
-    VOSK_MODEL_DIR=/opt/models/vosk-model-small-ru-0.22
+ENV GIGAAM_MODEL_DIR=/opt/models/gigaam-ctc
+COPY models/silero_vad.onnx /app/models/silero_vad.onnx
 COPY bot.py startBot.py /app/
 COPY modules/ /app/modules/
 COPY utils/ /app/utils/

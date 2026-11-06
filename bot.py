@@ -61,8 +61,7 @@ async def get_voice_session(guild):
     if guild.id not in voice_sessions:
         voice_sessions[guild.id] = VoiceSession(
             CloudflareTranscriber(os.getenv('CLOUDFLARE_ACCOUNT_ID', ''), os.getenv('CLOUDFLARE_API_TOKEN', '')),
-            LocalTranscriber(Path(os.getenv('GIGAAM_MODEL_DIR', '/data/models/gigaam-ctc'))),
-            os.getenv('VOSK_MODEL_DIR', '/data/models/vosk-model-small-ru-0.22'))
+            LocalTranscriber(Path(os.getenv('GIGAAM_MODEL_DIR', '/data/models/gigaam-ctc'))))
     session = voice_sessions[guild.id]
     try:
         await session.start()
@@ -141,7 +140,7 @@ async def start_recording(message):
         if vc.is_recording():
             return await message.reply('Запись уже идёт!')
         await session.stop()
-        sink = StreamSink()
+        sink = StreamSink(filters={'users': [message.author.id]})
         vc.start_recording(sink, recording_finished, None)
         interface = VoiceCommandInterface(bot, session, chat, music)
         session.listener = await interface.start_listening(message, sink, message.author.id)

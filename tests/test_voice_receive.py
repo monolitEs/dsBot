@@ -4,6 +4,7 @@ from contextlib import redirect_stdout
 import importlib.util
 import inspect
 import io
+import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
@@ -57,12 +58,18 @@ class VoiceReceiveTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(client.is_recording())
                 first_sink = client._reader.sink
                 self.assertIs(first_sink.client, client)
+                first_sink.write(VoiceData(None, Object(id=77), pcm=b'other'), Object(id=77))
+                self.assertEqual(first_sink.audio_data, {})
+                first_sink.write(VoiceData(None, message.author, pcm=b'author'), message.author)
+                self.assertEqual(first_sink.read(42), b'author')
                 self.assertFalse(inspect.iscoroutinefunction(client._reader.after))
                 self.assertIs(session.listener, listener)
                 await app.start_recording(message)
                 listen.assert_awaited_once()
                 message.reply.assert_awaited_once_with('Запись уже идёт!')
                 client.stop()
+                self.assertTrue(first_sink.finished)
+                self.assertEqual(first_sink.audio_data, {})
                 finished.assert_called_once_with(first_sink, None)
                 self.assertFalse(client.is_recording())
                 await app.start_recording(message)
@@ -106,7 +113,7 @@ class VoiceReceiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sink.read(42), b'')
         sink.write(data, data.source)
         self.assertEqual(sink.read(42), data.pcm)
-        self.assertEqual(sink.read(42, full=True), data.pcm * 2)
+        self.assertEqual(sink.read(42), b'')
 
     async def test_filter_uses_numeric_user_id_and_unknown_sender_is_ignored(self):
         sink = StreamSink(filters={'users': [42]})
@@ -120,6 +127,84 @@ class VoiceReceiveTests(unittest.IsolatedAsyncioTestCase):
             sink.read(77)
         with self.assertRaises(KeyError):
             sink.read(None)
+
+    async def test_repeated_reads_release_history_and_keep_participants_separate(self):
+        sink = StreamSink(filters={'users': [42, 77]})
+        for index in range(100):
+            for user_id in (42, 77):
+                sender = Object(id=user_id)
+                payload = bytes([index, user_id]) * 1024
+                sink.write(VoiceData(None, sender, pcm=payload), sender)
+            self.assertEqual(sink.read(42), bytes([index, 42]) * 1024)
+            self.assertEqual(sink.audio_data[42].file.getbuffer().nbytes, 0)
+            self.assertEqual(sink.read(77), bytes([index, 77]) * 1024)
+            self.assertEqual(sink.audio_data[77].file.getbuffer().nbytes, 0)
+            self.assertEqual(sink.read(42), b'')
+        sink.cleanup()
+
+    async def test_large_unread_audio_is_returned_without_truncation(self):
+        sink = StreamSink()
+        sender = Object(id=42)
+        payload = bytes(range(256)) * 32768
+        sink.write(VoiceData(None, sender, pcm=payload), sender)
+        sink.write(VoiceData(None, sender, pcm=payload), sender)
+        self.assertEqual(sink.read(42), payload * 2)
+        self.assertEqual(sink.audio_data[42].file.getbuffer().nbytes, 0)
+        sink.cleanup()
+
+    async def test_concurrent_write_and_read_preserve_all_pcm_in_order(self):
+        sink = StreamSink()
+        sender = Object(id=42)
+        sink.write(VoiceData(None, sender, pcm=b''), sender)
+        rendezvous = threading.Barrier(2, timeout=5)
+        failures = []
+
+        def produce():
+            try:
+                for batch in range(50):
+                    rendezvous.wait()
+                    for index in range(100):
+                        payload = (batch * 100 + index).to_bytes(4, 'little')
+                        sink.write(VoiceData(None, sender, pcm=payload), sender)
+                    rendezvous.wait()
+            except BaseException as error:
+                failures.append(error)
+                rendezvous.abort()
+
+        writer = threading.Thread(target=produce)
+        received = bytearray()
+        writer.start()
+        try:
+            for _ in range(50):
+                rendezvous.wait()
+                received.extend(sink.read(42))
+                rendezvous.wait()
+                received.extend(sink.read(42))
+        except BaseException:
+            rendezvous.abort()
+            raise
+        finally:
+            writer.join(timeout=5)
+        self.assertFalse(writer.is_alive())
+        self.assertEqual(failures, [])
+        expected = b''.join(index.to_bytes(4, 'little') for index in range(5000))
+        self.assertEqual(received, expected)
+        self.assertEqual(sink.read(42), b'')
+        sink.cleanup()
+
+    async def test_cleanup_releases_unread_audio_and_rejects_late_writes(self):
+        sink = StreamSink()
+        sender = Object(id=42)
+        sink.write(VoiceData(None, sender, pcm=b'pending'), sender)
+        audio_file = sink.audio_data[42].file
+        sink.cleanup()
+        self.assertTrue(audio_file.closed)
+        self.assertEqual(sink.audio_data, {})
+        sink.write(VoiceData(None, sender, pcm=b'late'), sender)
+        self.assertEqual(sink.audio_data, {})
+        with self.assertRaises(KeyError):
+            sink.read(42)
+        sink.cleanup()
 
     async def test_reader_callback_is_sync_and_reports_only_error_type(self):
         output = io.StringIO()
