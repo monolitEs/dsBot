@@ -31,7 +31,9 @@ class VoiceCommandInterface:
             return args
         return wrapper
 
-    async def start_listening(self, message, sink, user_id, interval=0.05):
+    async def start_listening(self, message, sink, user_id, interval=0.05, *,
+                              listen_while_speaking=False):
+        """Set listen_while_speaking=True to restore reception during TTS."""
         recording_id = f'{message.guild.id}_{user_id}_{uuid4().hex}'
         await self.session.reset_detector()
 
@@ -43,13 +45,16 @@ class VoiceCommandInterface:
                 data = b''
             recordings = await self.session.detect(data, time.monotonic())
             detected_at = time.monotonic()
+            if not listen_while_speaking:
+                recordings = recordings[:1]  # No backlog of replies after playback.
             for wav in recordings:
                 if self.session.closed:
                     return
                 filename = f'{recording_id}_{uuid4().hex}.wav'
                 await run_blocking(write_wav, filename, wav)
                 print(f'VAD: Передача в STT через {time.monotonic() - detected_at:.3f} с после определения паузы')
-                await self._process_recording(message, filename)
+                await self._process_recording(
+                    message, filename, sink=None if listen_while_speaking else sink)
 
         @listening_task.after_loop
         async def cleanup():
@@ -60,7 +65,7 @@ class VoiceCommandInterface:
         listening_task.start(message)
         return listening_task
 
-    async def _process_recording(self, message, filename):
+    async def _process_recording(self, message, filename, *, sink=None):
         try:
             start_time = time.monotonic()
             result = await self.session.transcribe(filename)
@@ -76,7 +81,18 @@ class VoiceCommandInterface:
             print(f'LLM: Время ответа: {time.monotonic() - start_time:.3f} с')
             print(f'LLM: {answer}')
             if not self.session.closed:
-                await self.music.say(request, answer)
+                if sink is None:
+                    await self.music.say(request, answer)
+                else:
+                    sink.set_listening(False)
+                    try:
+                        await self.session.reset_detector()
+                        await self.music.say(request, answer, wait=True)
+                    finally:
+                        try:
+                            await self.session.reset_detector()
+                        finally:
+                            sink.set_listening(True)
         except SttError as error:
             print(f'STT error={error}')
         finally:

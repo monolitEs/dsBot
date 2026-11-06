@@ -9,6 +9,7 @@ class StreamSink(sinks.WaveSink):
     def __init__(self, *, filters=None):
         super().__init__(filters=filters)
         self._buffer_lock = threading.Lock()
+        self._listening = True
         self.received_frames = 0
         self.unassigned_frames = 0
 
@@ -28,11 +29,19 @@ class StreamSink(sinks.WaveSink):
     @sinks.Filters.container
     def _write_pcm(self, data, user):
         with self._buffer_lock:
-            if self.finished:
+            if self.finished or not self._listening:
                 return
             if user not in self.audio_data:
                 self.audio_data[user] = sinks.AudioData(io.BytesIO())
             self.audio_data[user].write(data)
+
+    def set_listening(self, enabled: bool):
+        """Discard queued PCM at both boundaries of a playback interval."""
+        with self._buffer_lock:
+            self._listening = enabled
+            for audio in self.audio_data.values():
+                audio.file.seek(0)
+                audio.file.truncate(0)
 
     def read(self, user_id) -> bytes:
         """Consume this participant's pending PCM without retaining its history."""
