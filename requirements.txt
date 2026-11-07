@@ -4,8 +4,8 @@ davey==0.1.6
 gTTS==2.5.4
 openai==1.91.0
 pydub==0.25.1
-python-dotenv==1.1.0
-tiktoken==0.9.0
+python-dotenv==1.2.4
+tiktoken==0.14.0
 sherpa-onnx==2.0.1
 numpy==2.2.6
 yt_dlp==2025.6.9
