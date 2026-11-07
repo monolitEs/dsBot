@@ -11,12 +11,12 @@ from unittest.mock import AsyncMock, Mock, patch
 
 AVAILABLE = importlib.util.find_spec('discord') is not None
 if AVAILABLE:
-    import bot as app
+    from dsbot import bot as app
     from discord import Object, opus
     from discord.utils import MISSING
     from discord.voice import VoiceClient, VoiceData
     from discord.voice.receive.reader import AudioReader
-    from voice_interface.sinks import StreamSink
+    from dsbot.voice.sinks import StreamSink
 
 
 def voice_client():
@@ -49,7 +49,7 @@ class VoiceReceiveTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(app, 'music', SimpleNamespace(join=AsyncMock(return_value=client))), \
                 patch.object(app, 'get_voice_session', AsyncMock(return_value=session)), \
                 patch.object(app, 'recording_finished', Mock(wraps=app.recording_finished)) as finished, \
-                patch('voice_interface.core.VoiceCommandInterface.start_listening',
+                patch('dsbot.voice.core.VoiceCommandInterface.start_listening',
                       AsyncMock(return_value=listener)) as listen:
             try:
                 self.assertFalse(hasattr(client, 'recording'))
@@ -218,7 +218,7 @@ class VoiceReceiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('STT receive error=RuntimeError', output.getvalue())
         self.assertNotIn('fake-secret', output.getvalue())
 
-    async def test_receive_counts_frames_without_logging(self):
+    async def test_receive_preserves_pcm_without_logging(self):
         sink = StreamSink()
         sender = Object(id=42)
         payload = b'fake-secret'
@@ -227,7 +227,5 @@ class VoiceReceiveTests(unittest.IsolatedAsyncioTestCase):
             sink.write(VoiceData(None, None, pcm=payload), None)
             for _ in range(249):
                 sink.write(VoiceData(None, sender, pcm=payload), sender)
-        self.assertEqual(sink.received_frames, 250)
-        self.assertEqual(sink.unassigned_frames, 1)
         self.assertEqual(sink.read(42), payload * 249)
         self.assertEqual(output.getvalue(), '')

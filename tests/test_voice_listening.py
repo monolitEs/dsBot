@@ -14,9 +14,9 @@ AVAILABLE = all(importlib.util.find_spec(name) for name in
                 ('discord', 'sherpa_onnx', 'gtts'))
 if AVAILABLE:
     import discord
-    from modules.ytdl import Music
-    from voice_interface.core import VoiceCommandInterface
-    from voice_interface.sinks import StreamSink
+    from dsbot.music.player import Music
+    from dsbot.voice.core import VoiceCommandInterface
+    from dsbot.voice.sinks import StreamSink
     from test_voice_receive import voice_client
 
     class ControlledSource(discord.AudioSource):
@@ -40,7 +40,7 @@ class ListeningTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.enterContext(redirect_stdout(io.StringIO()))
         self.source = ControlledSource()
-        self.enterContext(patch('modules.ytdl.StreamingTTS', return_value=self.source))
+        self.enterContext(patch('dsbot.music.player.StreamingTTS', return_value=self.source))
         self.vc = voice_client()
         self.vc.loop = asyncio.get_running_loop()
         self.vc.client.loop = self.vc.loop
@@ -75,7 +75,7 @@ class ListeningTests(unittest.IsolatedAsyncioTestCase):
         session = SimpleNamespace(closed=False, fallback=False,
             reset_detector=AsyncMock(), detect=AsyncMock(return_value=[b'one', b'two']),
             transcribe=AsyncMock(return_value='question'))
-        chat = SimpleNamespace(send_message=AsyncMock(return_value='answer'))
+        chat = SimpleNamespace(send_message=Mock(return_value='answer'))
         interface = VoiceCommandInterface(None, session, chat, self.music)
         with tempfile.TemporaryDirectory() as directory, chdir(directory), \
                 patch('discord.ext.tasks.Loop.start'):
@@ -147,7 +147,7 @@ class ListeningTests(unittest.IsolatedAsyncioTestCase):
         for ending in ('stop', 'disconnect', 'error'):
             with self.subTest(ending=ending):
                 self.source = ControlledSource()
-                with patch('modules.ytdl.StreamingTTS', return_value=self.source):
+                with patch('dsbot.music.player.StreamingTTS', return_value=self.source):
                     pending = asyncio.create_task(self.music.say(self.message, 'answer', wait=True))
                     await self.started()
                     player = self.vc._player
@@ -181,7 +181,7 @@ class ListeningTests(unittest.IsolatedAsyncioTestCase):
                 session = SimpleNamespace(closed=False, fallback=False,
                     reset_detector=AsyncMock(), transcribe=AsyncMock(return_value='question'))
                 interface = VoiceCommandInterface(None, session,
-                    SimpleNamespace(send_message=AsyncMock(return_value='answer')),
+                    SimpleNamespace(send_message=Mock(return_value='answer')),
                     SimpleNamespace(say=fail))
                 with tempfile.TemporaryDirectory() as directory:
                     filename = Path(directory) / 'phrase.wav'

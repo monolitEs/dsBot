@@ -47,20 +47,3 @@ class DeepseekConfig:
             return reply
         except Exception as e:
             print(f"Ошибка: {e}")
-
-    async def custom_message(self, message, character_prompt):
-        conversation = [
-            {"role": "system", "content": self.system_prompt + character_prompt},
-            {"role": "assistant", "content": message}
-        ]
-
-        try:
-            response = self.openai_client.chat.completions.create(
-            model=self._model_name,
-            messages=conversation,
-            stream=False)
-
-            reply = response.choices[0].message.content
-            return reply
-        except Exception as e:
-            print(f"Ошибка: {e}")

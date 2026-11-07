@@ -43,8 +43,6 @@ RUN cd /app && python -m pip install --no-cache-dir -r requirements.txt
 COPY --from=stt-models /models/ /opt/models/
 ENV GIGAAM_MODEL_DIR=/opt/models/gigaam-ctc
 COPY models/silero_vad.onnx /app/models/silero_vad.onnx
-COPY bot.py startBot.py /app/
-COPY modules/ /app/modules/
-COPY utils/ /app/utils/
-COPY voice_interface/ /app/voice_interface/
+COPY startBot.py /app/
+COPY dsbot/ /app/dsbot/
 CMD ["python", "/app/startBot.py", "false"]

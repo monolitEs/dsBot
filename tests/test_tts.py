@@ -15,8 +15,8 @@ AVAILABLE = all(importlib.util.find_spec(name) for name in ('discord', 'gtts', '
 if AVAILABLE:
     import discord
     from discord.player import AudioPlayer
-    from modules.tts import StreamingTTS
-    from modules.ytdl import Music
+    from dsbot.music.tts import StreamingTTS
+    from dsbot.music.player import Music
 
 
 @unittest.skipUnless(AVAILABLE, 'Requires bot runtime dependencies')
@@ -45,7 +45,7 @@ class StreamTests(unittest.TestCase):
         yield from parts
 
     def source(self, chunks, decoded=None):
-        factory = self.enterContext(patch('modules.tts.gTTS'))
+        factory = self.enterContext(patch('dsbot.music.tts.gTTS'))
         factory.return_value.stream.return_value = self.chunks(chunks)
         if decoded is not None:
             self.enterContext(patch.object(StreamingTTS, '_decode', side_effect=decoded))
@@ -153,7 +153,7 @@ class StreamTests(unittest.TestCase):
             self.assertEqual(source.read(), b'')
 
     def test_two_sources_have_independent_buffers_and_cancellation(self):
-        factory = self.enterContext(patch('modules.tts.gTTS'))
+        factory = self.enterContext(patch('dsbot.music.tts.gTTS'))
         factory.return_value.stream.side_effect = [self.chunks([b'one']), self.chunks([b'two'])]
         self.enterContext(patch.object(StreamingTTS, '_decode',
                                        side_effect=lambda data: data[:1] * StreamingTTS.FRAME_SIZE))
@@ -192,7 +192,7 @@ class StreamTests(unittest.TestCase):
 
         decoder.communicate.side_effect = communicate
         decoder.kill.side_effect = released.set
-        self.enterContext(patch('modules.tts.subprocess.Popen', return_value=decoder))
+        self.enterContext(patch('dsbot.music.tts.subprocess.Popen', return_value=decoder))
         source, _ = self.source([b'audio'])
         self.addCleanup(released.set)
         self.start(source)
@@ -242,7 +242,7 @@ class PlaybackTests(unittest.IsolatedAsyncioTestCase):
             music = Music(None, None)
             music.guild_voice_client[guild] = Mock(
                 is_playing=Mock(return_value=playing), is_paused=Mock(return_value=paused))
-            with patch('modules.ytdl.StreamingTTS') as factory, redirect_stdout(io.StringIO()):
+            with patch('dsbot.music.player.StreamingTTS') as factory, redirect_stdout(io.StringIO()):
                 await music.say(message, 'answer')
             factory.assert_not_called()
 
@@ -253,8 +253,8 @@ class PlaybackTests(unittest.IsolatedAsyncioTestCase):
         music.guild_voice_client[guild] = Mock(
             is_playing=Mock(return_value=False), is_paused=Mock(return_value=False),
             play=Mock(side_effect=RuntimeError('disconnected')))
-        with patch('modules.ytdl.StreamingTTS', wraps=StreamingTTS), \
-                patch('modules.tts.gTTS') as upstream:
+        with patch('dsbot.music.player.StreamingTTS', wraps=StreamingTTS), \
+                patch('dsbot.music.tts.gTTS') as upstream:
             with self.assertRaises(RuntimeError):
                 await music.say(message, 'answer')
             upstream.assert_not_called()
@@ -269,7 +269,7 @@ class PlaybackTests(unittest.IsolatedAsyncioTestCase):
                 release.wait(3)
                 yield b'not decoded after stop'
 
-            with patch('modules.tts.gTTS') as upstream:
+            with patch('dsbot.music.tts.gTTS') as upstream:
                 upstream.return_value.stream.return_value = chunks()
                 source = StreamingTTS('test')
                 client = Mock()

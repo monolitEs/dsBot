@@ -10,9 +10,9 @@ from unittest.mock import patch
 import urllib.error
 import wave
 
-from voice_interface.cloudflare_stt import CloudflareTranscriber
-from voice_interface.local_stt import LocalTranscriber
-from voice_interface.transcription import QuotaExceeded, SerializedTranscriber, SttError, run_blocking
+from dsbot.voice.cloudflare_stt import CloudflareTranscriber
+from dsbot.voice.local_stt import LocalTranscriber
+from dsbot.voice.transcription import QuotaExceeded, SerializedTranscriber, SttError, run_blocking
 
 
 def wav_bytes(rate=16000, channels=1):
@@ -107,13 +107,13 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_package_export_remains_available_without_eager_core_import(self):
         import sys
         import types
-        import voice_interface
-        fake_core = types.ModuleType('voice_interface.core')
+        import dsbot.voice
+        fake_core = types.ModuleType('dsbot.voice.core')
         fake_core.VoiceCommandInterface = object()
-        with patch.dict(sys.modules, {'voice_interface.core': fake_core}):
-            self.assertIs(voice_interface.VoiceCommandInterface, fake_core.VoiceCommandInterface)
+        with patch.dict(sys.modules, {'dsbot.voice.core': fake_core}):
+            self.assertIs(dsbot.voice.VoiceCommandInterface, fake_core.VoiceCommandInterface)
         with self.assertRaises(AttributeError):
-            getattr(voice_interface, 'unknown_name')
+            getattr(dsbot.voice, 'unknown_name')
 
     async def test_internal_task_cancellation_does_not_spin_forever(self):
         with patch('asyncio.to_thread', side_effect=asyncio.CancelledError):
@@ -123,8 +123,8 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_trim_is_optional_and_native_reference_is_released(self):
         backend = LocalTranscriber('unused')
         backend._model = object()
-        with patch('voice_interface.local_stt.sys.platform', 'linux'):
-            with patch('voice_interface.local_stt.ctypes.CDLL', side_effect=OSError):
+        with patch('dsbot.voice.local_stt.sys.platform', 'linux'):
+            with patch('dsbot.voice.local_stt.ctypes.CDLL', side_effect=OSError):
                 await asyncio.to_thread(backend._unload)
         self.assertIsNone(backend._model)
 

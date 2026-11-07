@@ -1,6 +1,6 @@
 import os
 import sys
-from bot import init
+from dsbot.bot import init
 
 def main(voice_assistant):
     voice_assistant_bool = False
