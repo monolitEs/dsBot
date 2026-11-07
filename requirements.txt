@@ -8,4 +8,6 @@ python-dotenv==1.2.4
 tiktoken==0.14.0
 sherpa-onnx==2.0.1
 numpy==2.2.6
-yt_dlp==2025.6.9
+yt_dlp==2026.10.26
+yt-dlp-ejs==0.8.0
+deno==2.9.8
