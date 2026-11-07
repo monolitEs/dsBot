@@ -66,7 +66,7 @@ class VoiceCommandInterface:
             request = copy(message)
             request.content = '!' + result
             start_time = time.monotonic()
-            answer = await self.chat.send_message(request)
+            answer = self.chat.send_message(request)
             print(f'LLM: Время ответа: {time.monotonic() - start_time:.3f} с')
             print(f'LLM: {answer}')
             if not self.session.closed:

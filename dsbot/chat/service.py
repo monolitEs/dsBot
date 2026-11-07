@@ -1,8 +1,8 @@
 import tiktoken  # Для подсчёта токенов
 
 
-from modules.models_configs.deepseek import DeepseekConfig
-from utils.log_manager import LogManager
+from dsbot.chat.deepseek import DeepseekConfig
+from dsbot.logging import LogManager
 
 
 class Chat:
@@ -27,7 +27,7 @@ class Chat:
         self.client = self.config.create_openai_client()
     
     #Смена характера бота
-    async def changecharacter(self, ctx, character, name):
+    def changecharacter(self, ctx, character, name):
         if ctx.author.id not in self.users_data:
             messages = self.UserMessages()
             self.users_data[ctx.author.id] = messages
@@ -37,12 +37,12 @@ class Chat:
 
         self.log_manager.logging(self.users_data[ctx.author.id].character_prompt)
         
-    async def stopmessage(self, ctx):
+    def stopmessage(self, ctx):
         if ctx.author.id in self.users_data:
             self.users_data[ctx.author.id].messages = []
             
     #Получает все сообщения для данного юзера
-    async def get_recent_messages(self, message):
+    def get_recent_messages(self, message):
         messages = self.UserMessages()
         if message.author.id in self.users_data:
             messages = self.users_data[message.author.id]
@@ -77,8 +77,8 @@ class Chat:
         return total_tokens
     
     #Отправка сообщения с тем характером, что юзер задал
-    async def send_message(self, message):
-        user_messages = await self.get_recent_messages(message)
+    def send_message(self, message):
+        user_messages = self.get_recent_messages(message)
         user_messages.messages = self.trim_history(user_messages.messages)
 
 

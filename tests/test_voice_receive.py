@@ -11,12 +11,12 @@ from unittest.mock import AsyncMock, Mock, patch
 
 AVAILABLE = importlib.util.find_spec('discord') is not None
 if AVAILABLE:
-    import bot as app
+    from dsbot import bot as app
     from discord import Object, opus
     from discord.utils import MISSING
     from discord.voice import VoiceClient, VoiceData
     from discord.voice.receive.reader import AudioReader
-    from voice_interface.sinks import StreamSink
+    from dsbot.voice.sinks import StreamSink
 
 
 def voice_client():
@@ -49,7 +49,7 @@ class VoiceReceiveTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(app, 'music', SimpleNamespace(join=AsyncMock(return_value=client))), \
                 patch.object(app, 'get_voice_session', AsyncMock(return_value=session)), \
                 patch.object(app, 'recording_finished', Mock(wraps=app.recording_finished)) as finished, \
-                patch('voice_interface.core.VoiceCommandInterface.start_listening',
+                patch('dsbot.voice.core.VoiceCommandInterface.start_listening',
                       AsyncMock(return_value=listener)) as listen:
             try:
                 self.assertFalse(hasattr(client, 'recording'))

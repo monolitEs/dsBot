@@ -9,7 +9,7 @@ import sherpa_onnx
 
 from .transcription import SttError
 
-MODEL_PATH = Path(__file__).resolve().parents[1] / 'models' / 'silero_vad.onnx'
+MODEL_PATH = Path(__file__).resolve().parents[2] / 'models' / 'silero_vad.onnx'
 
 
 class SpeechDetector:

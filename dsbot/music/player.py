@@ -1,7 +1,7 @@
 import discord
 import yt_dlp
 import asyncio
-from modules.tts import StreamingTTS
+from dsbot.music.tts import StreamingTTS
 
 #Класс загрузки видосика
 class YTDLSource(discord.PCMVolumeTransformer):
@@ -41,6 +41,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
 
 #Сам диджей
 class Music:
+    NOT_IN_VOICE_CHANNEL = "Вы не в голосовом канале!"
     
     def __init__(self, bot, chat):
         self.bot = bot
@@ -66,7 +67,7 @@ class Music:
 
     async def join(self, message):
         if message.author.voice is None:
-            await message.reply("Вы не в голосовом канале!")
+            await message.reply(self.NOT_IN_VOICE_CHANNEL)
             return
 
         channel = message.author.voice.channel
@@ -87,7 +88,7 @@ class Music:
 
     async def play(self, message, url):
         if message.author.voice is None:
-             return await message.reply("Вы не в голосовом канале!")
+             return await message.reply(self.NOT_IN_VOICE_CHANNEL)
 
         channel = message.author.voice.channel
         voice_client = discord.utils.get(self.bot.voice_clients, guild=message.guild)
@@ -110,7 +111,7 @@ class Music:
             
     async def say(self, message, text, *, wait=False):
         if message.author.voice is None:
-             return await message.reply("Вы не в голосовом канале!")
+             return await message.reply(self.NOT_IN_VOICE_CHANNEL)
         vc = self.guild_voice_client[message.guild]
 
         if vc.is_playing() or vc.is_paused():
@@ -140,25 +141,25 @@ class Music:
         
             
 
-    async def pause(self, message):
+    def pause(self, message):
         voice_client = discord.utils.get(self.bot.voice_clients, guild=message.guild)
         if voice_client.is_playing():
             voice_client.pause()
 
-    async def resume(self, message):
+    def resume(self, message):
         voice_client = discord.utils.get(self.bot.voice_clients, guild=message.guild)
         if voice_client.is_paused():
             voice_client.resume()
 
 
-    async def stop(self, message):
+    def stop(self, message):
         voice_client = discord.utils.get(self.bot.voice_clients, guild=message.guild)
         if voice_client.is_playing() or voice_client.is_paused():
             voice_client.stop()
             if message.guild.id in self.queues:
                 self.queues[message.guild.id] = []
 
-    async def skip(self, message):
+    def skip(self, message):
         voice_client = discord.utils.get(self.bot.voice_clients, guild=message.guild)
         if voice_client.is_playing():
             voice_client.stop()

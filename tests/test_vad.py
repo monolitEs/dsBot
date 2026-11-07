@@ -9,8 +9,8 @@ from unittest.mock import Mock, patch
 import numpy as np
 from pydub.utils import audioop
 
-from voice_interface.transcription import SttError, read_pcm
-from voice_interface.vad import SpeechDetector
+from dsbot.voice.transcription import SttError, read_pcm
+from dsbot.voice.vad import SpeechDetector
 
 
 def stereo(samples):
@@ -102,7 +102,7 @@ class VadTests(unittest.TestCase):
         self.assertIsNone(detector.last_poll)
 
     def test_missing_model_is_controlled_without_network(self):
-        with patch('voice_interface.vad.MODEL_PATH', Path('/missing/silero_vad.onnx')):
+        with patch('dsbot.voice.vad.MODEL_PATH', Path('/missing/silero_vad.onnx')):
             with self.assertRaises(SttError):
                 SpeechDetector()
 

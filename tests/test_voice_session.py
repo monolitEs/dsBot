@@ -13,11 +13,11 @@ from unittest.mock import AsyncMock, Mock, call, patch
 
 AVAILABLE = all(importlib.util.find_spec(name) for name in ['discord', 'pydub', 'sherpa_onnx'])
 if AVAILABLE:
-    import bot as app
-    from modules.ytdl import Music
-    from voice_interface.core import VoiceCommandInterface
-    from voice_interface.stt import VoiceSession
-    from voice_interface.transcription import QuotaExceeded, SttError
+    from dsbot import bot as app
+    from dsbot.music.player import Music
+    from dsbot.voice.core import VoiceCommandInterface
+    from dsbot.voice.stt import VoiceSession
+    from dsbot.voice.transcription import QuotaExceeded, SttError
 
 
 @unittest.skipUnless(AVAILABLE, 'Requires bot runtime dependencies')
@@ -46,7 +46,7 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_load_on_start_only_and_cleanup_on_exit(self):
         session = self.make_session()
-        with patch('voice_interface.stt.SpeechDetector', return_value=object()) as model:
+        with patch('dsbot.voice.stt.SpeechDetector', return_value=object()) as model:
             session.local.start.assert_not_called()
             await asyncio.gather(session.start(), session.start())
             model.assert_called_once()
@@ -61,7 +61,7 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
     async def test_exact_quota_replays_same_wav_locally_for_rest_of_session(self):
         session = self.make_session()
         session.cloud.transcribe.side_effect = QuotaExceeded('quota')
-        with patch('voice_interface.stt.AudioSegment.from_wav') as read:
+        with patch('dsbot.voice.stt.AudioSegment.from_wav') as read:
             read.return_value.set_frame_rate.return_value.export.return_value.getvalue.return_value = b'normalized-wav'
             self.assertEqual(await session.transcribe('phrase.wav'), 'local')
             self.assertEqual(await session.transcribe('next.wav'), 'local')
@@ -73,7 +73,7 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
     async def test_other_errors_do_not_switch_backend(self):
         session = self.make_session()
         session.cloud.transcribe.side_effect = SttError('Cloudflare HTTP 403')
-        with patch('voice_interface.stt.AudioSegment.from_wav'):
+        with patch('dsbot.voice.stt.AudioSegment.from_wav'):
             with self.assertRaises(SttError):
                 await session.transcribe('phrase.wav')
         session.local.transcribe.assert_not_called()
@@ -81,7 +81,7 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_failed_start_rolls_back_models(self):
         session = self.make_session()
-        with patch('voice_interface.stt.SpeechDetector', side_effect=RuntimeError('missing model')):
+        with patch('dsbot.voice.stt.SpeechDetector', side_effect=RuntimeError('missing model')):
             with self.assertRaises(RuntimeError):
                 await session.start()
         session.local.close.assert_awaited_once()
@@ -108,7 +108,7 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
             await finish.wait()
             return 'late words'
         session.transcribe = transcribe
-        chat = SimpleNamespace(send_message=AsyncMock(return_value='answer'))
+        chat = SimpleNamespace(send_message=Mock(return_value='answer'))
         music = SimpleNamespace(say=AsyncMock())
         message = SimpleNamespace(guild=SimpleNamespace(id=10), content='!record')
         interface = VoiceCommandInterface(None, session, chat, music)
@@ -128,7 +128,7 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
 
 
     async def test_exit_waits_for_actual_http_thread_before_freeing_models(self):
-        from voice_interface.cloudflare_stt import CloudflareTranscriber
+        from dsbot.voice.cloudflare_stt import CloudflareTranscriber
         from test_transcription import wav_bytes
         session = self.make_session()
         session.cloud = CloudflareTranscriber('a' * 32, 'fake-key')
@@ -141,7 +141,7 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
                 raise RuntimeError('test timeout')
             return io.BytesIO(b'{"success":true,"result":{"text":"late"}}')
 
-        with patch('voice_interface.stt.AudioSegment.from_wav') as read, \
+        with patch('dsbot.voice.stt.AudioSegment.from_wav') as read, \
                 patch('urllib.request.urlopen', side_effect=respond):
             read.return_value.set_frame_rate.return_value.export.return_value.getvalue.return_value = wav_bytes()
             pending = asyncio.create_task(session.transcribe('phrase.wav'))
@@ -188,15 +188,15 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(session.detector)
 
     async def test_pcm_to_cloud_text_then_chat_and_speech_without_changing_message(self):
-        from voice_interface.cloudflare_stt import CloudflareTranscriber
-        from voice_interface.transcription import read_pcm
+        from dsbot.voice.cloudflare_stt import CloudflareTranscriber
+        from dsbot.voice.transcription import read_pcm
         session = self.make_session()
         session.cloud = CloudflareTranscriber('a' * 32, 'fake-key')
         await session.cloud.start()
         from test_transcription import wav_bytes
         session.detect = AsyncMock(side_effect=[[], [wav_bytes()]])
         message = SimpleNamespace(guild=SimpleNamespace(id=10), content='!record')
-        chat = SimpleNamespace(send_message=AsyncMock(return_value='answer'))
+        chat = SimpleNamespace(send_message=Mock(return_value='answer'))
         music = SimpleNamespace(say=AsyncMock())
         interface = VoiceCommandInterface(None, session, chat, music)
         sink = SimpleNamespace(read=Mock(side_effect=[b'\0' * 1920, b'']),
@@ -232,7 +232,7 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         session.transcribe = AsyncMock(side_effect=['', 'local words'])
         session.fallback = True
         message = SimpleNamespace(content='!record')
-        chat = SimpleNamespace(send_message=AsyncMock(return_value='local answer'))
+        chat = SimpleNamespace(send_message=Mock(return_value='local answer'))
         music = SimpleNamespace(say=AsyncMock())
         interface = VoiceCommandInterface(None, session, chat, music)
         output = io.StringIO()
@@ -248,7 +248,7 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(merged.exists())
         self.assertIn('STT (GigaAM): local words', output.getvalue())
         self.assertNotIn('Cloudflare', output.getvalue())
-        chat.send_message.assert_awaited_once()
+        chat.send_message.assert_called_once()
         music.say.assert_awaited_once()
 
     async def test_tts_uses_stream_source_without_a_shared_audio_file(self):
@@ -260,7 +260,7 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         voice.is_paused.return_value = False
         music.guild_voice_client[guild] = voice
         output = io.StringIO()
-        with patch('modules.ytdl.StreamingTTS') as source, redirect_stdout(output):
+        with patch('dsbot.music.player.StreamingTTS') as source, redirect_stdout(output):
             await music.say(message, 'spoken answer')
         source.assert_called_once_with('spoken answer')
         voice.play.assert_called_once_with(source.return_value)
@@ -278,7 +278,7 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         session.detect = AsyncMock(return_value=[b'fake-wav'])
         session.transcribe = AsyncMock(side_effect=SttError('Cloudflare HTTP 403'))
         message = SimpleNamespace(guild=SimpleNamespace(id=10), content='!record')
-        chat = SimpleNamespace(send_message=AsyncMock())
+        chat = SimpleNamespace(send_message=Mock())
         music = SimpleNamespace(say=AsyncMock())
         interface = VoiceCommandInterface(None, session, chat, music)
         sink = SimpleNamespace(read=Mock(return_value=b''))
@@ -309,7 +309,7 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         interface = VoiceCommandInterface(None, session, None, None)
         sink = SimpleNamespace(read=Mock(return_value=b'\0' * 1920))
         with tempfile.TemporaryDirectory() as directory, chdir(directory), \
-                patch('voice_interface.core.write_wav', side_effect=write_wav, create=True):
+                patch('dsbot.voice.core.write_wav', side_effect=write_wav, create=True):
             session.listener = await interface.start_listening(message, sink, 7, interval=60)
             try:
                 self.assertTrue(await asyncio.to_thread(entered.wait, 5))
@@ -391,7 +391,7 @@ class BotVoiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_init_true_does_not_load_models_until_voice_connection(self):
         with patch.object(app, 'Chat'), patch.object(app, 'Music'), patch.object(app, 'RoleManager'), \
-                patch('voice_interface.stt.SpeechDetector') as model:
+                patch('dsbot.voice.stt.SpeechDetector') as model:
             app.init(True)
             self.assertTrue(app.voice_assistant)
             self.assertFalse(app.voice_sessions)
@@ -402,9 +402,9 @@ class BotVoiceTests(unittest.IsolatedAsyncioTestCase):
         first = SimpleNamespace(start=AsyncMock(), close=AsyncMock())
         second = SimpleNamespace(start=AsyncMock(), close=AsyncMock())
         guild = SimpleNamespace(id=10)
-        with patch('voice_interface.stt.VoiceSession', side_effect=[first, second]) as factory, \
-                patch('voice_interface.cloudflare_stt.CloudflareTranscriber'), \
-                patch('voice_interface.local_stt.LocalTranscriber'), \
+        with patch('dsbot.voice.stt.VoiceSession', side_effect=[first, second]) as factory, \
+                patch('dsbot.voice.cloudflare_stt.CloudflareTranscriber'), \
+                patch('dsbot.voice.local_stt.LocalTranscriber'), \
                 patch.object(app.bot._connection, 'user', SimpleNamespace(id=99)), \
                 patch.object(app, 'voice_assistant', True):
             self.assertIs(await app.get_voice_session(guild), first)
@@ -451,9 +451,9 @@ class BotVoiceTests(unittest.IsolatedAsyncioTestCase):
         vc.is_connected = lambda: vc.connected
         message = SimpleNamespace(guild=SimpleNamespace(id=10, voice_client=vc), reply=AsyncMock())
         with patch.object(app, 'music', SimpleNamespace(join=AsyncMock(return_value=vc))), \
-                patch('voice_interface.cloudflare_stt.CloudflareTranscriber', return_value=cloud), \
-                patch('voice_interface.local_stt.LocalTranscriber', return_value=local), \
-                patch('voice_interface.stt.SpeechDetector', return_value=object()):
+                patch('dsbot.voice.cloudflare_stt.CloudflareTranscriber', return_value=cloud), \
+                patch('dsbot.voice.local_stt.LocalTranscriber', return_value=local), \
+                patch('dsbot.voice.stt.SpeechDetector', return_value=object()):
             starting = asyncio.create_task(app.start_recording(message))
             await asyncio.wait_for(entered.wait(), 2)
             session = app.voice_sessions[10]

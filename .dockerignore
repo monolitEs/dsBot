@@ -1,14 +1,9 @@
 **
 !Dockerfile
 !requirements.txt
-!bot.py
 !startBot.py
-!modules/
-!modules/**
-!utils/
-!utils/**
-!voice_interface/
-!voice_interface/**
+!dsbot/
+!dsbot/**
 !models/
 !models/silero_vad.onnx
 !docker/
