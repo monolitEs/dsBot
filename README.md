@@ -61,6 +61,42 @@ Silero — `/app/models`, GigaAM — `/opt/models/gigaam-ctc`.
 путь к каталогу данных на хосте. `VOICE_ASSISTANT` выбирает `false` или `true`.
 Команда контейнера остаётся `python /app/startBot.py <флаг>`.
 
+## Cookies YouTube при автоматической сборке
+
+Сохраните `cookies.txt` на Меркурии в каталоге, указанном GitHub-переменной
+`DSBOT_DATA_DIR`. Например, если там `/srv/dsbot/data`, нужен файл
+`/srv/dsbot/data/cookies.txt`. Compose подключает этот каталог в `/data`,
+а бот читает `/data/cookies.txt`. Файл сохраняется между пересборками и
+пересозданием контейнера; сборщику он не нужен. `.gitignore` и `.dockerignore`
+исключают `cookies.txt`; не добавляйте его в Git, образ или артефакты CI.
+
+Бот работает с UID/GID `10001:10001`. Файл должен принадлежать этому пользователю
+и иметь права `0600`: yt-dlp может не только читать, но и обновлять cookies.
+После замены файла перезапустите контейнер, чтобы загрузчик перечитал его.
+
+Экспорт из Firefox с Cookie-Editor:
+
+1. Разрешите расширению работу в приватных окнах, откройте такое окно и войдите
+   в YouTube под выбранным аккаунтом.
+2. В той же единственной приватной вкладке откройте
+   `https://www.youtube.com/robots.txt`.
+3. Экспортируйте cookies текущего сайта `youtube.com` (включая `.youtube.com`)
+   в формате **Netscape**, сохраните как `cookies.txt` с переводами строк LF.
+   Нужен весь набор cookies сайта, а не отдельный cookie или экспорт JSON.
+4. Закройте приватное окно и больше не используйте эту сессию в браузере.
+   Передайте файл на Меркурий через SSH/SFTP в указанный каталог данных.
+
+Первая строка файла — `# Netscape HTTP Cookie File` или `# HTTP Cookie File`.
+Cookie-Editor поддерживает Netscape; если кнопка экспорта копирует текст,
+сохраните его в файл UTF-8 без BOM. Файл даёт доступ к сессии аккаунта:
+не отправляйте его в чат и не экспортируйте cookies всех сайтов браузера.
+Cookies могут истекать; при ошибке авторизации повторите экспорт и замените файл.
+Для обычных публичных видео авторизация может не понадобиться.
+
+Источники: [формат cookies](https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp),
+[экспорт сессии YouTube](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies),
+[Netscape в Cookie-Editor](https://addons.mozilla.org/en-US/firefox/addon/cookie-editor/versions/).
+
 ## Проверки
 
 В подготовленном окружении Python 3.11 с зависимостями приложения, FFmpeg и Opus:
