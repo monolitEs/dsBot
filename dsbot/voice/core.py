@@ -5,6 +5,7 @@ import time
 from copy import copy
 from uuid import uuid4
 from .transcription import SttError, run_blocking
+from dsbot.chat.deepseek import LlmError
 
 
 def write_wav(filename, data):
@@ -66,7 +67,9 @@ class VoiceCommandInterface:
             request = copy(message)
             request.content = '!' + result
             start_time = time.monotonic()
-            answer = self.chat.send_message(request)
+            answer = await self.chat.send_message(request)
+            if answer is None:
+                return
             print(f'LLM: Время ответа: {time.monotonic() - start_time:.3f} с')
             print(f'LLM: {answer}')
             if not self.session.closed:
@@ -84,5 +87,7 @@ class VoiceCommandInterface:
                             sink.set_listening(True)
         except SttError as error:
             print(f'STT error={error}')
+        except LlmError:
+            print('LLM: Ответ недоступен')
         finally:
             os.remove(filename)

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, Mock, call, patch
 
 import dsbot.bot as app
 from dsbot.music.player import Music
+from dsbot.chat.deepseek import LlmError
 
 
 class MusicControlsTests(unittest.TestCase):
@@ -57,13 +58,54 @@ class MusicControlsTests(unittest.TestCase):
 
 
 class DiscordEntryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_text_message_uses_sync_chat_result_in_reply(self):
-        chat = Mock()
-        chat.send_message.return_value = 'answer'
+    async def test_context_command_shows_and_changes_global_budget(self):
+        from dsbot.chat.service import Chat
+        with patch('dsbot.chat.service.DeepseekConfig.create_openai_client'):
+            chat = Chat()
+        ctx = SimpleNamespace(respond=AsyncMock())
+        with patch.object(app, 'chat', chat):
+            await app.context.callback(ctx)
+            self.assertIn('256000', ctx.respond.call_args.args[0])
+            await app.context.callback(ctx, 8192)
+            self.assertEqual(chat.context_tokens, 8192)
+            self.assertIn('8192', ctx.respond.call_args.args[0])
+            await app.context.callback(ctx, 256000)
+            self.assertEqual(chat.context_tokens, 256000)
+        option = app.context.options[0]
+        self.assertFalse(option.required)
+        self.assertEqual((option.min_value, option.max_value), (8192, 256000))
+
+    async def test_failed_chat_replies_with_safe_error_and_stale_result_is_silent(self):
+        chat = SimpleNamespace(send_message=AsyncMock(side_effect=LlmError('unavailable')))
         message = SimpleNamespace(author=object(), content='!question', reply=AsyncMock())
         with patch.object(app, 'chat', chat):
             await app.on_message(message)
-        chat.send_message.assert_called_once_with(message)
+            message.reply.assert_awaited_once_with('unavailable')
+            message.reply.reset_mock()
+            chat.send_message.side_effect = None
+            chat.send_message.return_value = None
+            await app.on_message(message)
+            message.reply.assert_not_called()
+
+    async def test_bot_shutdown_closes_llm_even_without_discord_login(self):
+        chat = SimpleNamespace(close=AsyncMock())
+        with patch.object(app, 'chat', chat), \
+                patch('discord.ext.commands.Bot.close', new_callable=AsyncMock) as close:
+            await app.bot.close()
+            chat.close.assert_awaited_once()
+            close.assert_awaited_once()
+            chat.close.side_effect = RuntimeError('close failed')
+            with self.assertRaises(RuntimeError):
+                await app.bot.close()
+            self.assertEqual(close.await_count, 2)
+
+    async def test_text_message_awaits_chat_result_in_reply(self):
+        chat = Mock()
+        chat.send_message = AsyncMock(return_value='answer')
+        message = SimpleNamespace(author=object(), content='!question', reply=AsyncMock())
+        with patch.object(app, 'chat', chat):
+            await app.on_message(message)
+        chat.send_message.assert_awaited_once_with(message)
         message.reply.assert_awaited_once_with('answer')
 
     async def test_music_commands_invoke_sync_controls_without_awaiting_result(self):
@@ -82,7 +124,7 @@ class DiscordEntryTests(unittest.IsolatedAsyncioTestCase):
         ctx = SimpleNamespace(respond=AsyncMock())
         with patch.object(app, 'chat', chat):
             await app.changecharacter.callback(ctx, 'guide', 'mentor')
-            chat.changecharacter.assert_called_once_with(ctx, 'guide', 'mentor')
+            chat.changecharacter.assert_called_once_with('guide', 'mentor')
             ctx.respond.assert_awaited_once_with(
                 '✅ Системный промпт обновлен! \n Теперь моя роль: guide')
             ctx.respond.reset_mock()

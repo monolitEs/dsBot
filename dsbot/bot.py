@@ -9,9 +9,19 @@ from discord import Option
 from dsbot.roles import RoleManager
 from dsbot.music.player import Music
 from dsbot.chat.service import Chat
+from dsbot.chat.deepseek import LlmError
+
+
+class DsBot(commands.Bot):
+    async def close(self):
+        try:
+            if chat is not None:
+                await chat.close()
+        finally:
+            await super().close()
 
 intents = discord.Intents.all()
-bot = commands.Bot(command_prefix='!', intents=intents)
+bot = DsBot(command_prefix='!', intents=intents)
 chat = None
 music = None
 role_manager = None
@@ -39,7 +49,7 @@ def init(voice_assistant_bool):
 @bot.slash_command(name="changecharacter", description="Смена характера бота")
 async def changecharacter(ctx, arg: Option(str, description="Описание характера", required=True),
                           arg2: Option(str, description="Имя", required=True)):
-    chat.changecharacter(ctx, arg, arg2)
+    chat.changecharacter(arg, arg2)
     await ctx.respond("✅ Системный промпт обновлен! \n Теперь моя роль: " + arg)
 
 # Прекращение контекста для пользователя
@@ -47,6 +57,15 @@ async def changecharacter(ctx, arg: Option(str, description="Описание х
 async def stopmessage(ctx):
     chat.stopmessage(ctx)
     await ctx.respond("❎ Контекст очищен")
+
+
+@bot.slash_command(name="context", description="Размер контекста всего бота в токенах")
+async def context(ctx, tokens: Option(int, description="От 8192 до 256000; без значения — показать",
+                                     required=False, min_value=8192, max_value=256000) = None):
+    if tokens is not None:
+        chat.set_context_tokens(tokens)
+    await ctx.respond(f'Контекст: {chat.context_tokens} токенов, из них 4096 — резерв ответа. '
+                      'Настройка действует до перезапуска бота.')
 
 @bot.event
 async def on_ready():
@@ -120,7 +139,12 @@ async def on_message(message):
         elif message.content.startswith("!role"):
             return await role_manager.create_role(message, "admin", 0, 0, 0)
 
-        return await message.reply(chat.send_message(message))
+        try:
+            answer = await chat.send_message(message)
+        except LlmError as error:
+            return await message.reply(str(error))
+        if answer is not None:
+            return await message.reply(answer)
 
 async def start_recording(message):
     from dsbot.voice.sinks import StreamSink
