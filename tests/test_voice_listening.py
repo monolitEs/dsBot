@@ -75,7 +75,7 @@ class ListeningTests(unittest.IsolatedAsyncioTestCase):
         session = SimpleNamespace(closed=False, fallback=False,
             reset_detector=AsyncMock(), detect=AsyncMock(return_value=[b'one', b'two']),
             transcribe=AsyncMock(return_value='question'))
-        chat = SimpleNamespace(send_message=Mock(return_value='answer'))
+        chat = SimpleNamespace(send_message=AsyncMock(return_value='answer'))
         interface = VoiceCommandInterface(None, session, chat, self.music)
         with tempfile.TemporaryDirectory() as directory, chdir(directory), \
                 patch('discord.ext.tasks.Loop.start'):
@@ -181,7 +181,7 @@ class ListeningTests(unittest.IsolatedAsyncioTestCase):
                 session = SimpleNamespace(closed=False, fallback=False,
                     reset_detector=AsyncMock(), transcribe=AsyncMock(return_value='question'))
                 interface = VoiceCommandInterface(None, session,
-                    SimpleNamespace(send_message=Mock(return_value='answer')),
+                    SimpleNamespace(send_message=AsyncMock(return_value='answer')),
                     SimpleNamespace(say=fail))
                 with tempfile.TemporaryDirectory() as directory:
                     filename = Path(directory) / 'phrase.wav'
