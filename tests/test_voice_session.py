@@ -3,6 +3,7 @@ import asyncio
 from contextlib import chdir, redirect_stdout
 import importlib.util
 import io
+from itertools import count
 import json
 from pathlib import Path
 import tempfile
@@ -10,35 +11,88 @@ import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, call, patch
+from test_voice_receive import voice_client
 
 AVAILABLE = all(importlib.util.find_spec(name) for name in ['discord', 'pydub', 'sherpa_onnx'])
 if AVAILABLE:
     from dsbot import bot as app
+    from dsbot.chat.service import Chat
     from dsbot.music.player import Music
     from dsbot.voice.core import VoiceCommandInterface
     from dsbot.voice.stt import VoiceSession
     from dsbot.voice.transcription import QuotaExceeded, SttError
 
 
+def mock_voice_chat(**answer_options):
+    sequence = count(1)
+
+    def reserve(_message=None, channel_id=9, _session_id=None):
+        return SimpleNamespace(event=SimpleNamespace(sequence=next(sequence), channel_id=channel_id))
+
+    return SimpleNamespace(reserve_voice=Mock(side_effect=reserve), skip_voice=Mock(),
+                           answer_voice=AsyncMock(**answer_options), can_play_voice=Mock(return_value=True))
+
+
 @unittest.skipUnless(AVAILABLE, 'Requires bot runtime dependencies')
 class SessionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_clear_during_detector_reset_skips_old_tts_and_allows_new_reply(self):
+        from test_chat import message
+
+        vc = voice_client()
+        request = message(42, '', channel=vc.channel.id)
+        with patch('dsbot.chat.service.DeepseekConfig') as config:
+            chat = Chat()
+        config.return_value.send_message = AsyncMock(return_value='answer')
+        chat.trim_history = Mock(side_effect=lambda messages, _budget: messages)
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def reset_detector():
+            entered.set()
+            await release.wait()
+
+        session = self.make_session()
+        session.transcribe = AsyncMock(return_value='question')
+        session.reset_detector = AsyncMock(side_effect=reset_detector)
+        music = SimpleNamespace(say=AsyncMock())
+        sink = SimpleNamespace(set_listening=Mock())
+        interface = VoiceCommandInterface(vc, session, chat, music)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'phrase.wav'
+            path.touch()
+            entry = chat.reserve_voice(request, vc.channel.id, 'recording')
+            pending = asyncio.create_task(interface._process_recording(
+                request, str(path), entry, sink=sink))
+            await asyncio.wait_for(entered.wait(), 2)
+            chat.stopmessage(request)
+            release.set()
+            await pending
+            music.say.assert_not_called()
+            self.assertFalse(path.exists())
+            self.assertEqual(sink.set_listening.call_args_list, [call(False), call(True)])
+
+            path.touch()
+            entry = chat.reserve_voice(request, vc.channel.id, 'recording')
+            await interface._process_recording(request, str(path), entry, sink=sink)
+            music.say.assert_awaited_once()
+
     async def test_disconnect_during_llm_skips_tts_and_removes_wav(self):
         session = self.make_session()
         session.transcribe = AsyncMock(return_value='question')
         entered, release = asyncio.Event(), asyncio.Event()
 
-        async def answer(request):
+        async def answer(_entry, _text):
             entered.set()
             await release.wait()
             return 'late answer'
 
-        chat = SimpleNamespace(send_message=AsyncMock(side_effect=answer))
+        chat = mock_voice_chat(side_effect=answer)
         music = SimpleNamespace(say=AsyncMock())
-        interface = VoiceCommandInterface(None, session, chat, music)
+        interface = VoiceCommandInterface(voice_client(), session, chat, music)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'phrase.wav'
             path.touch()
-            pending = asyncio.create_task(interface._process_recording(SimpleNamespace(), str(path)))
+            pending = asyncio.create_task(interface._process_recording(
+                SimpleNamespace(), str(path), chat.reserve_voice()))
             await asyncio.wait_for(entered.wait(), 2)
             session.closed = True
             release.set()
@@ -46,25 +100,45 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(path.exists())
         music.say.assert_not_called()
 
+    async def test_move_during_llm_does_not_play_in_new_channel(self):
+        session = self.make_session()
+        session.transcribe = AsyncMock(return_value='question')
+        vc = voice_client()
+
+        async def answer(_entry, _text):
+            vc.channel = SimpleNamespace(id=99)
+            return 'answer from original channel'
+
+        chat = mock_voice_chat(side_effect=answer)
+        music = SimpleNamespace(say=AsyncMock())
+        interface = VoiceCommandInterface(vc, session, chat, music)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'phrase.wav'
+            path.touch()
+            await interface._process_recording(SimpleNamespace(), str(path), chat.reserve_voice())
+            self.assertFalse(path.exists())
+        chat.answer_voice.assert_awaited_once()
+        music.say.assert_not_called()
+
     async def test_llm_failure_does_not_terminate_voice_processing(self):
         from dsbot.chat.deepseek import LlmError
         session = self.make_session()
         session.transcribe = AsyncMock(return_value='question')
-        chat = SimpleNamespace(send_message=AsyncMock(side_effect=[LlmError('unavailable'), None, 'answer']))
+        chat = mock_voice_chat(side_effect=[LlmError('unavailable'), None, 'answer'])
         music = SimpleNamespace(say=AsyncMock())
-        interface = VoiceCommandInterface(None, session, chat, music)
+        interface = VoiceCommandInterface(voice_client(), session, chat, music)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'phrase.wav'
             path.touch()
-            await interface._process_recording(SimpleNamespace(), str(path))
+            await interface._process_recording(SimpleNamespace(), str(path), chat.reserve_voice())
             self.assertFalse(path.exists())
             music.say.assert_not_called()
             path.touch()
-            await interface._process_recording(SimpleNamespace(), str(path))
+            await interface._process_recording(SimpleNamespace(), str(path), chat.reserve_voice())
             self.assertFalse(path.exists())
             music.say.assert_not_called()
             path.touch()
-            await interface._process_recording(SimpleNamespace(), str(path))
+            await interface._process_recording(SimpleNamespace(), str(path), chat.reserve_voice())
             self.assertFalse(path.exists())
         music.say.assert_awaited_once()
 
@@ -73,7 +147,7 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         session.detect = AsyncMock(return_value=[])
         message = SimpleNamespace(guild=SimpleNamespace(id=10))
         sink = SimpleNamespace(read=Mock(side_effect=[KeyError(), b'', b'\0' * 1920]))
-        interface = VoiceCommandInterface(None, session, None, None)
+        interface = VoiceCommandInterface(voice_client(), session, None, None)
         output = io.StringIO()
         with tempfile.TemporaryDirectory() as directory, chdir(directory), \
                 patch('discord.ext.tasks.Loop.start'), redirect_stdout(output):
@@ -154,10 +228,10 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
             await finish.wait()
             return 'late words'
         session.transcribe = transcribe
-        chat = SimpleNamespace(send_message=AsyncMock(return_value='answer'))
+        chat = mock_voice_chat(return_value='answer')
         music = SimpleNamespace(say=AsyncMock())
         message = SimpleNamespace(guild=SimpleNamespace(id=10), content='!record')
-        interface = VoiceCommandInterface(None, session, chat, music)
+        interface = VoiceCommandInterface(voice_client(), session, chat, music)
         sink = SimpleNamespace(read=Mock(return_value=b''))
         with tempfile.TemporaryDirectory() as directory, chdir(directory), \
                 patch('discord.ext.tasks.Loop.start'):
@@ -168,7 +242,7 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
             finish.set()
             await pending
             self.assertFalse(list(Path('.').glob('*.wav')))
-        chat.send_message.assert_not_called()
+        chat.answer_voice.assert_not_called()
         music.say.assert_not_called()
         self.assertEqual(message.content, '!record')
 
@@ -242,9 +316,9 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         from test_transcription import wav_bytes
         session.detect = AsyncMock(side_effect=[[], [wav_bytes()]])
         message = SimpleNamespace(guild=SimpleNamespace(id=10), content='!record')
-        chat = SimpleNamespace(send_message=AsyncMock(return_value='answer'))
+        chat = mock_voice_chat(return_value='answer')
         music = SimpleNamespace(say=AsyncMock())
-        interface = VoiceCommandInterface(None, session, chat, music)
+        interface = VoiceCommandInterface(voice_client(), session, chat, music)
         sink = SimpleNamespace(read=Mock(side_effect=[b'\0' * 1920, b'']),
                                set_listening=Mock())
         response = io.BytesIO(b'{"success":true,"result":{"text":"hello"}}')
@@ -260,7 +334,10 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
             payload = json.loads(http.call_args.args[0].data)
             self.assertTrue(read_pcm(base64.b64decode(payload['audio'])))
             self.assertEqual(list(Path('.').glob('*.wav')), [])
-        request = chat.send_message.call_args.args[0]
+        chat.reserve_voice.assert_called_once()
+        self.assertEqual(chat.reserve_voice.call_args.args[:2], (message, 9))
+        self.assertEqual(chat.answer_voice.call_args.args[1], 'hello')
+        request = music.say.call_args.args[0]
         self.assertEqual(request.content, '!hello')
         self.assertEqual(message.content, '!record')
         music.say.assert_awaited_once_with(request, 'answer', wait=True)
@@ -278,23 +355,23 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         session.transcribe = AsyncMock(side_effect=['', 'local words'])
         session.fallback = True
         message = SimpleNamespace(content='!record')
-        chat = SimpleNamespace(send_message=AsyncMock(return_value='local answer'))
+        chat = mock_voice_chat(return_value='local answer')
         music = SimpleNamespace(say=AsyncMock())
-        interface = VoiceCommandInterface(None, session, chat, music)
+        interface = VoiceCommandInterface(voice_client(), session, chat, music)
         output = io.StringIO()
         with tempfile.TemporaryDirectory() as directory, redirect_stdout(output):
             merged = Path(directory) / 'merged.wav'
             merged.touch()
-            await interface._process_recording(message, str(merged))
-            chat.send_message.assert_not_called()
+            await interface._process_recording(message, str(merged), chat.reserve_voice())
+            chat.answer_voice.assert_not_called()
             music.say.assert_not_called()
             self.assertFalse(merged.exists())
             merged.touch()
-            await interface._process_recording(message, str(merged))
+            await interface._process_recording(message, str(merged), chat.reserve_voice())
             self.assertFalse(merged.exists())
         self.assertIn('STT (GigaAM): local words', output.getvalue())
         self.assertNotIn('Cloudflare', output.getvalue())
-        chat.send_message.assert_called_once()
+        chat.answer_voice.assert_called_once()
         music.say.assert_awaited_once()
 
     async def test_tts_uses_stream_source_without_a_shared_audio_file(self):
@@ -324,16 +401,16 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         session.detect = AsyncMock(return_value=[b'fake-wav'])
         session.transcribe = AsyncMock(side_effect=SttError('Cloudflare HTTP 403'))
         message = SimpleNamespace(guild=SimpleNamespace(id=10), content='!record')
-        chat = SimpleNamespace(send_message=AsyncMock())
+        chat = mock_voice_chat()
         music = SimpleNamespace(say=AsyncMock())
-        interface = VoiceCommandInterface(None, session, chat, music)
+        interface = VoiceCommandInterface(voice_client(), session, chat, music)
         sink = SimpleNamespace(read=Mock(return_value=b''))
         with tempfile.TemporaryDirectory() as directory, chdir(directory), \
                 patch('discord.ext.tasks.Loop.start'):
             loop = await interface.start_listening(message, sink, 7)
             await loop.coro(message)
             self.assertFalse(list(Path('.').glob('*.wav')))
-        chat.send_message.assert_not_called()
+        chat.answer_voice.assert_not_called()
         music.say.assert_not_called()
 
 
@@ -352,7 +429,7 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
             Path(filename).write_bytes(data)
 
         message = SimpleNamespace(guild=SimpleNamespace(id=10), content='!record')
-        interface = VoiceCommandInterface(None, session, None, None)
+        interface = VoiceCommandInterface(voice_client(), session, mock_voice_chat(), None)
         sink = SimpleNamespace(read=Mock(return_value=b'\0' * 1920))
         with tempfile.TemporaryDirectory() as directory, chdir(directory), \
                 patch('dsbot.voice.core.write_wav', side_effect=write_wav, create=True):
@@ -377,7 +454,7 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         entered = threading.Event()
         session.detector.feed.side_effect = lambda *args: (entered.set(), [])[1]
         message = SimpleNamespace(guild=SimpleNamespace(id=10), content='!record')
-        interface = VoiceCommandInterface(None, session, None, None)
+        interface = VoiceCommandInterface(voice_client(), session, None, None)
         sink = SimpleNamespace(read=Mock(return_value=b'pending'))
         with tempfile.TemporaryDirectory() as directory, chdir(directory):
             session.listener = await interface.start_listening(message, sink, 7, interval=60)

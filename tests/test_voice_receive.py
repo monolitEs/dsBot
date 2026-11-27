@@ -24,7 +24,7 @@ def voice_client():
     client = VoiceClient.__new__(VoiceClient)
     sender = Object(id=42)
     guild = SimpleNamespace(get_member=Mock(return_value=sender))
-    client.channel = SimpleNamespace(guild=guild)
+    client.channel = SimpleNamespace(id=9, guild=guild)
     client.client = SimpleNamespace(get_user=Mock(return_value=sender))
     client._connection = SimpleNamespace(mode='xsalsa20_poly1305', secret_key=bytes(32),
         dave_session=None, add_socket_listener=Mock(), remove_socket_listener=Mock())

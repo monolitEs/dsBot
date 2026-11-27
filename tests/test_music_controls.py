@@ -77,7 +77,7 @@ class DiscordEntryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_failed_chat_replies_with_safe_error_and_stale_result_is_silent(self):
         chat = SimpleNamespace(send_message=AsyncMock(side_effect=LlmError('unavailable')))
-        message = SimpleNamespace(author=object(), content='!question', reply=AsyncMock())
+        message = SimpleNamespace(author=SimpleNamespace(bot=False), content='!question', reply=AsyncMock())
         with patch.object(app, 'chat', chat):
             await app.on_message(message)
             message.reply.assert_awaited_once_with('unavailable')
@@ -102,11 +102,24 @@ class DiscordEntryTests(unittest.IsolatedAsyncioTestCase):
     async def test_text_message_awaits_chat_result_in_reply(self):
         chat = Mock()
         chat.send_message = AsyncMock(return_value='answer')
-        message = SimpleNamespace(author=object(), content='!question', reply=AsyncMock())
+        message = SimpleNamespace(author=SimpleNamespace(bot=False), content='!question', reply=AsyncMock())
         with patch.object(app, 'chat', chat):
             await app.on_message(message)
         chat.send_message.assert_awaited_once_with(message)
         message.reply.assert_awaited_once_with('answer')
+
+    async def test_human_text_is_saved_but_bot_text_and_controls_are_excluded(self):
+        chat = Mock()
+        chat.send_message = AsyncMock()
+        human = SimpleNamespace(bot=False)
+        note = SimpleNamespace(author=human, content='release Friday')
+        with patch.object(app, 'chat', chat), patch.object(app, 'voice_assistant', False):
+            await app.on_message(note)
+            await app.on_message(SimpleNamespace(author=human, content='!record'))
+            await app.on_message(SimpleNamespace(author=SimpleNamespace(bot=True), content='bot output'))
+            await app.on_message(SimpleNamespace(author=human, content=''))
+        chat.remember_message.assert_called_once_with(note)
+        chat.send_message.assert_not_awaited()
 
     async def test_music_commands_invoke_sync_controls_without_awaiting_result(self):
         music = Mock(spec=Music)
@@ -114,7 +127,7 @@ class DiscordEntryTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(command=command), patch.object(app, 'music', music):
                 music.reset_mock()
                 getattr(music, command).return_value = None
-                message = SimpleNamespace(author=object(), content='!' + command)
+                message = SimpleNamespace(author=SimpleNamespace(bot=False), content='!' + command)
                 self.assertIsNone(await app.on_message(message))
                 self.assertEqual(music.mock_calls, [getattr(call, command)(message)])
 

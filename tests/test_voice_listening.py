@@ -18,6 +18,7 @@ if AVAILABLE:
     from dsbot.voice.core import VoiceCommandInterface
     from dsbot.voice.sinks import StreamSink
     from test_voice_receive import voice_client
+    from test_voice_session import mock_voice_chat
 
     class ControlledSource(discord.AudioSource):
         def __init__(self):
@@ -75,8 +76,8 @@ class ListeningTests(unittest.IsolatedAsyncioTestCase):
         session = SimpleNamespace(closed=False, fallback=False,
             reset_detector=AsyncMock(), detect=AsyncMock(return_value=[b'one', b'two']),
             transcribe=AsyncMock(return_value='question'))
-        chat = SimpleNamespace(send_message=AsyncMock(return_value='answer'))
-        interface = VoiceCommandInterface(None, session, chat, self.music)
+        chat = mock_voice_chat(return_value='answer')
+        interface = VoiceCommandInterface(self.vc, session, chat, self.music)
         with tempfile.TemporaryDirectory() as directory, chdir(directory), \
                 patch('discord.ext.tasks.Loop.start'):
             loop = await interface.start_listening(self.message, sink, 42)
@@ -107,10 +108,12 @@ class ListeningTests(unittest.IsolatedAsyncioTestCase):
         self.message.guild = type('Guild', (), {'id': 10})()
         session = SimpleNamespace(closed=False, detect=AsyncMock(return_value=[b'one', b'two']),
                                   reset_detector=AsyncMock())
-        interface = VoiceCommandInterface(None, session, None, None)
+        chat = mock_voice_chat()
+        interface = VoiceCommandInterface(self.vc, session, chat, None)
 
-        async def process(message, filename, *, sink):
+        async def process(message, filename, entry, *, sink):
             self.assertIsNone(sink)
+            self.assertEqual(chat.reserve_voice.call_count, 2)
             await self.music.say(self.message, 'answer')
             Path(filename).unlink()
 
@@ -180,14 +183,13 @@ class ListeningTests(unittest.IsolatedAsyncioTestCase):
 
                 session = SimpleNamespace(closed=False, fallback=False,
                     reset_detector=AsyncMock(), transcribe=AsyncMock(return_value='question'))
-                interface = VoiceCommandInterface(None, session,
-                    SimpleNamespace(send_message=AsyncMock(return_value='answer')),
-                    SimpleNamespace(say=fail))
+                chat = mock_voice_chat(return_value='answer')
+                interface = VoiceCommandInterface(self.vc, session, chat, SimpleNamespace(say=fail))
                 with tempfile.TemporaryDirectory() as directory:
                     filename = Path(directory) / 'phrase.wav'
                     filename.touch()
                     pending = asyncio.create_task(interface._process_recording(
-                        self.message, str(filename), sink=sink))
+                        self.message, str(filename), chat.reserve_voice(), sink=sink))
                     await asyncio.wait_for(entered.wait(), 3)
                     if cancel:
                         pending.cancel()

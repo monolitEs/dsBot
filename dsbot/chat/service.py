@@ -3,6 +3,7 @@ import asyncio
 
 
 from dsbot.chat.deepseek import DeepseekConfig, LlmError
+from dsbot.chat.history import ConversationHistory
 from dsbot.logging import LogManager
 
 
@@ -15,17 +16,10 @@ class Chat:
 
     MAX_TOKENS = 256000
     
-    class UserMessages:
-        def __init__(self):
-            self.messages = []
-            self.lock = asyncio.Lock()
-            self.version = 0
-    
-    
     def __init__(self):
         self.log_manager = LogManager()
         self.config = DeepseekConfig()
-        self.users_data = {}
+        self.histories = {}
         self.client = self.config.create_openai_client()
         self.character_prompt = self.DEFAULT_CHARACTER_PROMPT
         self.character_name = self.DEFAULT_CHARACTER_NAME
@@ -40,9 +34,9 @@ class Chat:
         self.log_manager.logging(self.character_prompt)
         
     def stopmessage(self, ctx):
-        if ctx.author.id in self.users_data:
-            self.users_data[ctx.author.id].messages = []
-            self.users_data[ctx.author.id].version += 1
+        key = (ctx.guild.id if ctx.guild else None, ctx.channel.id)
+        if key in self.histories:
+            self.histories[key].clear()
 
     def set_context_tokens(self, tokens):
         if not 8192 <= tokens <= self.MAX_TOKENS:
@@ -50,18 +44,27 @@ class Chat:
         self.context_tokens = tokens
         self.version += 1
             
-    #Получает все сообщения для данного юзера
-    def get_recent_messages(self, message):
-        messages = self.UserMessages()
-        if message.author.id in self.users_data:
-            messages = self.users_data[message.author.id]
-        else:
-            self.users_data[message.author.id] = messages
+    def _reserve(self, message, channel_id, session_id=None):
+        key = (message.guild.id if message.guild else None, channel_id)
+        if key not in self.histories:
+            self.histories[key] = ConversationHistory(key)
+        history = self.histories[key]
+        return history.reserve(message, session_id, self.version)
 
-        messages.messages.append({'role': 'user', 'content':
-            f'[id={message.author.id}, name={message.author.name}] {message.content[1:]}'})
+    def remember_message(self, message):
+        entry = self._reserve(message, message.channel.id)
+        if entry is not None:
+            entry.content = message.content
+            entry.settled.set()
 
-        return messages
+    def reserve_voice(self, message, channel_id, session_id):
+        return self._reserve(message, channel_id, session_id)
+
+    def skip_voice(self, entry, reason):
+        if not entry.settled.is_set():
+            print(f'Chat: voice_skipped event={entry.event.event_id} reason={reason}')
+            entry.preceding = None
+            entry.settled.set()
 
     #Режет сообщения если токенов больше чем контекст
     def trim_history(self, messages, max_tokens=MAX_TOKENS):
@@ -104,24 +107,46 @@ class Chat:
             total_tokens += len(encoding.encode(message['content'], disallowed_special=()))
         return total_tokens
     
-    #Отправка сообщения с общим персонажем бота
     async def send_message(self, message):
-        user_messages = self.users_data.setdefault(message.author.id, self.UserMessages())
-        async with user_messages.lock:
-            self.get_recent_messages(message)
-            version = (self.version, user_messages.version)
+        entry = self._reserve(message, message.channel.id)
+        if entry is not None:
+            return await self._answer(entry, message.content[1:])
+
+    async def answer_voice(self, entry, text):
+        if entry.content is None and not entry.settled.is_set():
+            return await self._answer(entry, text)
+
+    def can_play_voice(self, entry):
+        event = entry.event
+        history = self.histories[(event.guild_id, event.channel_id)]
+        return event.sequence > history.cleared_through and entry.settings_version == self.version
+
+    def _is_current(self, entry):
+        return not entry.settled.is_set() and entry.settings_version == self.version
+
+    async def _answer(self, entry, text):
+        entry.content = text
+        event = entry.event
+        history = self.histories[(event.guild_id, event.channel_id)]
+        try:
+            messages = await history.snapshot(entry)
+            if not self._is_current(entry):
+                return None
             persona = f'{self.character_prompt}\nТвоё имя: {self.character_name}'
-            conversation = [self.config.system_message(persona),
-                            *[item.copy() for item in user_messages.messages]]
+            conversation = [self.config.system_message(persona), *messages]
             conversation = await asyncio.to_thread(self.trim_history, conversation, self.context_tokens - 4096)
-            if version != (self.version, user_messages.version):
+            if not self._is_current(entry):
                 return None
-            user_messages.messages = [item.copy() for item in conversation[1:]]
             reply = await self.config.send_message(conversation)
-            if version != (self.version, user_messages.version):
+            if not self._is_current(entry):
                 return None
-            user_messages.messages.append({'role': 'assistant', 'content': reply})
+            entry.reply = reply
             return reply
+        except LlmError:
+            if self._is_current(entry):
+                raise
+        finally:
+            entry.settled.set()
 
     async def close(self):
         await self.config.close()
