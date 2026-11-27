@@ -52,7 +52,7 @@ async def changecharacter(ctx, arg: Option(str, description="Описание х
     chat.changecharacter(arg, arg2)
     await ctx.respond("✅ Системный промпт обновлен! \n Теперь моя роль: " + arg)
 
-# Прекращение контекста для пользователя
+# Очистка контекста канала
 @bot.slash_command(name="stopmessage", description="Стоп слово для бота")
 async def stopmessage(ctx):
     chat.stopmessage(ctx)
@@ -109,7 +109,7 @@ async def on_voice_state_update(member, before, after):
 # Обработка сообщений
 @bot.event
 async def on_message(message):
-    if message.author == bot.user:
+    if message.author.bot or not message.content:
         return
 
     if message.content.startswith("!"):
@@ -134,6 +134,7 @@ async def on_message(message):
         elif message.content.startswith("!record"):
             if voice_assistant:
                 return await start_recording(message)
+            return
         elif message.content.startswith("!endrecord"):
             return await stop_recording(message)
         elif message.content.startswith("!role"):
@@ -145,6 +146,8 @@ async def on_message(message):
             return await message.reply(str(error))
         if answer is not None:
             return await message.reply(answer)
+    else:
+        chat.remember_message(message)
 
 async def start_recording(message):
     from dsbot.voice.sinks import StreamSink
@@ -164,9 +167,11 @@ async def start_recording(message):
         if vc.is_recording():
             return await message.reply('Запись уже идёт!')
         await session.stop()
+        if session.closed or not vc.is_connected() or vc.channel is None:
+            return
         sink = StreamSink(filters={'users': [message.author.id]})
         vc.start_recording(sink, recording_finished, None)
-        interface = VoiceCommandInterface(bot, session, chat, music)
+        interface = VoiceCommandInterface(vc, session, chat, music)
         session.listener = await interface.start_listening(message, sink, message.author.id)
 
 def recording_finished(sink, _context):
