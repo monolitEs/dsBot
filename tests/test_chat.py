@@ -26,6 +26,11 @@ class CharacterEncoder:
         return list(text)
 
 
+class CharacterEncoder:
+    def encode(self, text, **kwargs):
+        return list(text)
+
+
 class TokenBudgetTests(unittest.TestCase):
     def setUp(self):
         self.chat = Chat.__new__(Chat)
