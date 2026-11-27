@@ -35,35 +35,9 @@ class VoiceCommandInterface:
 
         @tasks.loop(seconds=interval)
         async def listening_task(message):
-            try:
-                data = sink.read(user_id)
-            except KeyError:
-                data = b''
-            if not self._in_channel(channel_id):
-                return
-            recordings = await self.session.detect(data, time.monotonic())
-            detected_at = time.monotonic()
-            if not listen_while_speaking:
-                recordings = recordings[:1]  # No backlog of replies after playback.
-            if not self._in_channel(channel_id):
-                return
-            pending = [(self.chat.reserve_voice(message, channel_id, recording_id), wav)
-                       for wav in recordings]
-            try:
-                for entry, wav in pending:
-                    if not self._in_channel(channel_id):
-                        return
-                    if entry is None:
-                        continue
-                    filename = f'{recording_id}_{entry.event.sequence}.wav'
-                    await run_blocking(write_wav, filename, wav)
-                    print(f'VAD: Передача в STT через {time.monotonic() - detected_at:.3f} с после определения паузы')
-                    await self._process_recording(
-                        message, filename, entry, sink=None if listen_while_speaking else sink)
-            finally:
-                for entry, _wav in pending:
-                    if entry is not None:
-                        self.chat.skip_voice(entry, 'interrupted')
+            await self._listen_once(
+                message, sink, user_id, channel_id, recording_id,
+                listen_while_speaking=listen_while_speaking)
 
         @listening_task.after_loop
         async def cleanup():
@@ -73,6 +47,38 @@ class VoiceCommandInterface:
 
         listening_task.start(message)
         return listening_task
+
+    async def _listen_once(self, message, sink, user_id, channel_id, recording_id, *,
+                           listen_while_speaking):
+        try:
+            data = sink.read(user_id)
+        except KeyError:
+            data = b''
+        if not self._in_channel(channel_id):
+            return
+        recordings = await self.session.detect(data, time.monotonic())
+        detected_at = time.monotonic()
+        if not listen_while_speaking:
+            recordings = recordings[:1]  # No backlog of replies after playback.
+        if not self._in_channel(channel_id):
+            return
+        pending = [(self.chat.reserve_voice(message, channel_id, recording_id), wav)
+                   for wav in recordings]
+        try:
+            for entry, wav in pending:
+                if not self._in_channel(channel_id):
+                    return
+                if entry is None:
+                    continue
+                filename = f'{recording_id}_{entry.event.sequence}.wav'
+                await run_blocking(write_wav, filename, wav)
+                print(f'VAD: Передача в STT через {time.monotonic() - detected_at:.3f} с после определения паузы')
+                await self._process_recording(
+                    message, filename, entry, sink=None if listen_while_speaking else sink)
+        finally:
+            for entry, _wav in pending:
+                if entry is not None:
+                    self.chat.skip_voice(entry, 'interrupted')
 
     async def _process_recording(self, message, filename, entry, *, sink=None):
         channel_id = entry.event.channel_id
